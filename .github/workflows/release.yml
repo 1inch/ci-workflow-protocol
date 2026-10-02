@@ -1,0 +1,82 @@
+name: Create release
+
+on:
+  workflow_call:
+    inputs:
+      tag-prefix:
+        description: Text in front of the package.json version in the tag, `v` for `v1.2.3` or empty for `1.2.3`
+        type: string
+        default: v
+      changelog:
+        description: Take the notes from `yarn changelog --stdout` instead of generating them from merged pull requests
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Find the release tag
+        env:
+          TAG_PREFIX: ${{ inputs.tag-prefix }}
+        run: |
+          version=$(jq -r .version package.json)
+          tag="${TAG_PREFIX}${version}"
+          if ! git rev-parse -q --verify "refs/tags/${tag}" > /dev/null; then
+            echo "::error::Tag ${tag} does not exist. Push it before creating the release"
+            exit 1
+          fi
+          echo "VERSION=${version}" >> "$GITHUB_ENV"
+          echo "TAG=${tag}" >> "$GITHUB_ENV"
+
+      - name: Setup Node.js
+        if: ${{ inputs.changelog }}
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          package-manager-cache: false
+
+      - name: Install node modules
+        if: ${{ inputs.changelog }}
+        run: yarn install --frozen-lockfile
+
+      # Each release in the changelog starts with a "<repository>/<version> (<date>)" line.
+      - name: Take the notes from the changelog
+        id: changelog
+        if: ${{ inputs.changelog }}
+        run: |
+          notes=$(yarn --silent changelog --stdout | awk -v start="/${VERSION} (" -v next_release="${GITHUB_REPOSITORY#*/}/" '
+            index($0, start) { print; found = 1; next }
+            index($0, next_release) == 1 { found = 0 }
+            found
+          ')
+          if [ -z "$notes" ]; then
+            echo "::error::The changelog has no entry for ${VERSION}"
+            exit 1
+          fi
+          delimiter="notes_$(openssl rand -hex 8)"
+          {
+            echo "notes<<${delimiter}"
+            printf '%s\n' "$notes"
+            echo "${delimiter}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create the GitHub release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ env.TAG }}
+          name: Release ${{ env.TAG }}
+          body: ${{ steps.changelog.outputs.notes }}
+          generate_release_notes: ${{ !inputs.changelog }}
+          prerelease: ${{ contains(env.VERSION, '-') }}
+          # A patch for an older line must not replace a newer release as "Latest".
+          make_latest: legacy

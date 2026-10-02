@@ -1,0 +1,100 @@
+name: Hardhat CI
+
+on:
+  workflow_call:
+    inputs:
+      profile:
+        description: Build profile that `yarn test` uses, for the artifact cache key
+        type: string
+        default: default
+      sources:
+        description: Contract source directory, for the artifact cache key
+        type: string
+        default: contracts
+      snapshot:
+        description: Run `yarn snapshot:check`
+        type: boolean
+        default: false
+      lint:
+        description: Run `yarn lint`
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: yarn
+
+      - name: Cache Hardhat artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            artifacts
+            cache
+          key: hh-${{ runner.os }}-${{ inputs.profile }}-${{ hashFiles('hardhat.config.ts', 'yarn.lock', format('{0}/**/*.sol', inputs.sources)) }}
+          restore-keys: |
+            hh-${{ runner.os }}-${{ inputs.profile }}-
+
+      - name: Install node modules
+        run: yarn install --frozen-lockfile
+
+      - name: Run tests
+        run: yarn test
+
+  snapshot:
+    if: ${{ inputs.snapshot }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: yarn
+
+      - name: Install node modules
+        run: yarn install --frozen-lockfile
+
+      - name: Run snapshot check
+        run: yarn snapshot:check
+
+  lint:
+    if: ${{ inputs.lint }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: yarn
+
+      - name: Install node modules
+        run: yarn install --frozen-lockfile
+
+      - name: Run linter
+        run: yarn lint

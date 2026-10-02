@@ -1,0 +1,41 @@
+name: Check package version
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          package-manager-cache: false
+
+      - name: Compare with the latest version on npm
+        run: |
+          name=$(node -p "require('./package.json').name")
+          current=$(node -p "require('./package.json').version")
+          if ! published=$(npm view "$name" version 2> npm-view.log); then
+            if grep -q E404 npm-view.log; then
+              echo "$name is not on npm yet, so $current is a new version"
+              exit 0
+            fi
+            cat npm-view.log
+            exit 1
+          fi
+          echo "package.json: $current, latest on npm: $published"
+          if ! npx --yes semver@7.8.5 --include-prerelease --range ">$published" "$current" > /dev/null; then
+            echo "::error::Raise the version in package.json above $published, the latest $name on npm"
+            exit 1
+          fi
