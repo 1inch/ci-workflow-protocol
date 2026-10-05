@@ -7,7 +7,7 @@ Shared GitHub Actions workflows and the release flow of the 1inch contract repos
 
 | Shared workflow | Caller in the repository | What it does |
 |---|---|---|
-| `hardhat-ci.yml` | `ci.yml` | `yarn test`, plus `yarn snapshot:check` and `yarn lint` where enabled |
+| `hardhat-ci.yml` | `ci.yml` | `yarn test`, plus `yarn snapshot:check`, `yarn lint` and `yarn coverage` where enabled |
 | `check-version.yml` | `cpv.yml` | Fails a pull request whose `package.json` version is not above the latest on npm |
 | `release.yml` | `release.yml` | Creates the GitHub Release for the tag of the `package.json` version |
 | `publish.yml` | `publish.yml` | Publishes the package to npm with trusted publishing |
@@ -53,8 +53,16 @@ jobs:
 | `sources` | string | `contracts` | Contract source directory, for the artifact cache key |
 | `snapshot` | boolean | `false` | Run the `snapshot` job, `yarn snapshot:check`. Enable it where gas snapshots are tracked |
 | `lint` | boolean | `false` | Run the `lint` job, `yarn lint`. Enable it where a linter is configured |
+| `coverage` | boolean | `false` | Run the `coverage` job, `yarn coverage`, and upload the report to Codecov. Enable it where the repository is set up on Codecov |
 
-The checks are reported as `ci / test`, `ci / snapshot` and `ci / lint`; require exactly the ones a repository runs on `master`. CI reads no secrets, so pull requests from forks run it too.
+With `coverage: true`, the caller also passes the Codecov token:
+
+```yaml
+    secrets:
+      CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+```
+
+The checks are reported as `ci / test`, `ci / snapshot`, `ci / lint` and `ci / coverage`; require exactly the ones a repository runs on `master`. Only the `coverage` job reads a secret. A failed upload does not fail the job, so pull requests from forks, which get no secrets, still pass CI.
 
 ## Releases
 
