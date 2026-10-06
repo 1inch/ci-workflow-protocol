@@ -8,8 +8,8 @@ Shared GitHub Actions workflows and the release flow of the 1inch contract repos
 | Shared workflow | Caller in the repository | What it does |
 |---|---|---|
 | `hardhat-ci.yml` | `ci.yml` | `yarn test`, plus `yarn typecheck`, `yarn snapshot:check`, `yarn lint` and `yarn coverage` where enabled |
-| `check-version.yml` | `cpv.yml` | Fails a pull request whose `package.json` version is not above the latest on npm |
-| `tag.yml` | `tag.yml` | Tags the `package.json` version on the commit it is run from, by hand |
+| `check-version.yml` | `cpv.yml` | Fails a pull request into `release/X.Y.Z` that sets another version, or that arrives after the tag exists |
+| `tag.yml` | `tag.yml` | Tags the `package.json` version on the head of `release/X.Y.Z`, run by hand |
 | `release.yml` | `release.yml` | Creates the GitHub Release for the tag of the `package.json` version |
 | `publish.yml` | `publish.yml` | Publishes the package to npm with trusted publishing |
 | `publish-github-packages.yml` | `publish.yml` | Publishes the package to GitHub Packages |
@@ -29,7 +29,7 @@ name: CI
 on:
   pull_request:
   push:
-    branches: [master]
+    branches: [master, 'release/**']
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -68,17 +68,17 @@ The checks are reported as `ci / test`, `ci / snapshot`, `ci / lint` and `ci / c
 
 ## Releases
 
-For repositories that publish an npm package. [RELEASE_FLOW.md](RELEASE_FLOW.md) says when a tag is created. The tag workflow creates it from `package.json` when someone runs it, and the release and publish workflows then run from that tag.
+Every repository follows [RELEASE_FLOW.md](RELEASE_FLOW.md) and has the version check, the tag and the GitHub Release workflows. Repositories that publish an npm package also have the publish workflow.
 
 ### Version check
 
-`.github/workflows/cpv.yml`, for a repository where every pull request into `master` raises the version, such as solidity-utils:
+`.github/workflows/cpv.yml`, on pull requests into a release branch:
 
 ```yaml
 name: CHECK_PACKAGE_VERSION
 on:
   pull_request:
-    branches: [master]
+    branches: ['release/**']
 
 permissions:
   contents: read
@@ -88,11 +88,11 @@ jobs:
     uses: 1inch/ci-workflow-protocol/.github/workflows/check-version.yml@master
 ```
 
-A package that is not on npm yet passes.
+A pull request into `release/X.Y.Z` fails when it sets `package.json` to a version other than `X.Y.Z`, and once the tag `vX.Y.Z` exists, because the branch is then frozen. A pull request that leaves the version as it is passes; `TAG` takes the version from `package.json` when the release is ready.
 
 ### Tag
 
-`.github/workflows/tag.yml`, run by hand from the commit to release, such as `master` once CI has passed there. It tags that commit with the `package.json` version:
+`.github/workflows/tag.yml`, run by hand from `release/X.Y.Z` once the release is ready. It takes the version from `package.json` on that branch, tags the branch's head with it, and refuses to run from any branch other than `release/<that version>`:
 
 ```yaml
 name: TAG
@@ -105,13 +105,11 @@ permissions:
 jobs:
   tag:
     uses: 1inch/ci-workflow-protocol/.github/workflows/tag.yml@master
-    with:
-      tag-prefix: v
 ```
 
 | Input | Type | Default | Meaning |
 |---|---|---|---|
-| `tag-prefix` | string | `v` | Text in front of the `package.json` version in the tag: `v` for `v1.2.3`, empty for `1.2.3` |
+| `tag-prefix` | string | `v` | Text in front of the `package.json` version in the tag. The release flow uses `v`; the version check and the GitHub Release workflow take the same input |
 
 When the tag already exists, the version has not changed and the workflow does nothing: it never moves a tag. A tag created this way does not start other workflows, so `CREATE_RELEASE` and `PUBLISH` are run by hand from it.
 

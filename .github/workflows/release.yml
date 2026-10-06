@@ -49,12 +49,12 @@ jobs:
         if: ${{ inputs.changelog }}
         run: yarn install --frozen-lockfile
 
-      # Each release in the changelog starts with a "<repository>/<version> (<date>)" line.
+      # Each release in the changelog starts with a "<repository>/<tag> (<date>)" line.
       - name: Take the notes from the changelog
         id: changelog
         if: ${{ inputs.changelog }}
         run: |
-          notes=$(yarn --silent changelog --stdout | awk -v start="/${VERSION} (" -v next_release="${GITHUB_REPOSITORY#*/}/" '
+          notes=$(yarn --silent changelog --stdout | awk -v start="/${TAG} (" -v next_release="${GITHUB_REPOSITORY#*/}/" '
             index($0, start) { print; found = 1; next }
             index($0, next_release) == 1 { found = 0 }
             found

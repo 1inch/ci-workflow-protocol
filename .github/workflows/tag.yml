@@ -25,7 +25,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG_PREFIX: ${{ inputs.tag-prefix }}
         run: |
-          tag="${TAG_PREFIX}$(jq -r .version package.json)"
+          version=$(jq -r .version package.json)
+          if [ "$GITHUB_REF_NAME" != "release/${version}" ]; then
+            echo "::error::Run TAG from release/${version}, the release branch of the version in package.json, not from ${GITHUB_REF_NAME}"
+            exit 1
+          fi
+          tag="${TAG_PREFIX}${version}"
           if gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${tag}" > /dev/null 2>&1; then
             echo "${tag} already exists, so the version in package.json has not changed. Tags are never moved."
             exit 0

@@ -1,6 +1,6 @@
 # Release Flow
 
-This flow covers the 1inch repositories that deploy contracts: aqua, swap-vm, limit-order-protocol, fusion-protocol and cross-chain-swap. solidity-utils deploys nothing and releases from `master`: every pull request raises the package version, and each release is a tag `X.Y.Z` on `master`, which the tag workflow creates from `package.json` when a maintainer runs it.
+This flow covers every 1inch contract repository: solidity-utils, aqua, swap-vm, limit-order-protocol, fusion-protocol and cross-chain-swap. A repository that deploys nothing, such as solidity-utils, skips the deploy and the deployment artifact; every other step is the same.
 
 Contracts are immutable and every version is a fresh deploy, so: **one release branch == one audit == one deploy == one tag.**
 
@@ -38,7 +38,7 @@ SemVer `vMAJOR.MINOR.PATCH`:
 | MINOR | Backwards-compatible addition                                |
 | PATCH | Bug or security fix, no externally observable change         |
 
-Every bump is a release branch and a deploy. No deploy, no bump.
+Every bump is a release branch, and a deploy where the repository deploys contracts. No release branch, no bump.
 
 ## Lifecycle
 
@@ -75,7 +75,7 @@ gitGraph
 1. Freeze: branch `release/X.Y.Z` (from `master`, or from the previous tag for a patch). This commit is what goes to audit.
 2. Findings land as `audit-*` PRs, other bugs as `fix/*` PRs, on the release branch.
 3. Maintainer merges the release branch back into `master` in batches so fixes reach the next version.
-4. CI deploys, commits `deployments/<chain>/vX.Y.Z.json` to the release branch, tags that commit `vX.Y.Z`, does the final back-merge into `master`.
+4. Deploy and commit `deployments/<chain>/vX.Y.Z.json` to the release branch, where the repository deploys contracts. Run `TAG` from the release branch: it takes the version from `package.json` there and tags the branch's head `vX.Y.Z`. Do the final back-merge into `master`.
 5. Branch is frozen. If another release branch is in flight and needs the fix, cherry-pick it there.
 
 ## Deployment artifacts
@@ -84,11 +84,16 @@ Each deploy commits `deployments/<chain>/vX.Y.Z.json` to its release branch: add
 
 ## Tags
 
-`release/X.Y.Z` produces exactly one tag `vX.Y.Z`, created by CI in the same step that commits the artifact. Tags are never moved or deleted; a mistake means a new patch release.
+`release/X.Y.Z` produces exactly one tag `vX.Y.Z`, created by the `TAG` workflow, which a maintainer runs by hand from the release branch once the artifact is committed. It takes the version from `package.json` on the release branch, so `package.json` says `X.Y.Z` by then, and it refuses to run from any branch other than `release/<that version>`. Tags are never moved or deleted; a mistake means a new patch release.
 
-## GitHub Release and npm package
+## Workflows
 
-In a repository that publishes an npm package, once the tag exists, run its `CREATE_RELEASE` workflow, which creates the GitHub Release for that tag, and then `PUBLISH`. Both call the shared workflows in this repository; see the [README](README.md).
+Every repository runs the same workflows, which call the shared ones in this repository; see the [README](README.md):
+
+- `CI` on every pull request and on pushes to `master` and `release/*`.
+- `CHECK_PACKAGE_VERSION` on pull requests into `release/X.Y.Z`. It fails when a pull request sets `package.json` to a version other than `X.Y.Z`, and once `vX.Y.Z` exists, so a frozen branch takes no more changes.
+- `TAG`, then `CREATE_RELEASE` from the tag, which creates the GitHub Release.
+- `PUBLISH` from the tag, where the repository publishes an npm package.
 
 ## Propagating fixes
 
