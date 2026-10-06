@@ -32,7 +32,7 @@ jobs:
           version=$(jq -r .version package.json)
           tag="${TAG_PREFIX}${version}"
           if ! git rev-parse -q --verify "refs/tags/${tag}" > /dev/null; then
-            echo "::error::Tag ${tag} does not exist. Push it before creating the release"
+            echo "::error::Tag ${tag} does not exist. Run TAG from release/${version} before creating the release"
             exit 1
           fi
           echo "VERSION=${version}" >> "$GITHUB_ENV"
