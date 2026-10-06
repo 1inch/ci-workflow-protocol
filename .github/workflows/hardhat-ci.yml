@@ -19,6 +19,10 @@ on:
         description: Run `yarn lint`
         type: boolean
         default: false
+      typecheck:
+        description: Run `yarn typecheck` in the `test` job, after the tests have generated the types
+        type: boolean
+        default: false
       coverage:
         description: Run `yarn coverage` and upload the report to Codecov
         type: boolean
@@ -62,6 +66,10 @@ jobs:
 
       - name: Run tests
         run: yarn test
+
+      - name: Run typecheck
+        if: ${{ inputs.typecheck }}
+        run: yarn typecheck
 
   snapshot:
     if: ${{ inputs.snapshot }}

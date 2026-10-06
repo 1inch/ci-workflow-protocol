@@ -1,6 +1,6 @@
 # Release Flow
 
-This flow covers the 1inch repositories that deploy contracts: aqua, swap-vm, limit-order-protocol, fusion-protocol and cross-chain-swap. solidity-utils deploys nothing and releases from `master`: every pull request raises the package version, and each release is a tag `X.Y.Z` on `master`.
+This flow covers the 1inch repositories that deploy contracts: aqua, swap-vm, limit-order-protocol, fusion-protocol and cross-chain-swap. solidity-utils deploys nothing and releases from `master`: every pull request raises the package version, and each release is a tag `X.Y.Z` on `master`, which the tag workflow creates from `package.json` when a maintainer runs it.
 
 Contracts are immutable and every version is a fresh deploy, so: **one release branch == one audit == one deploy == one tag.**
 

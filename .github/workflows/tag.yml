@@ -1,0 +1,34 @@
+name: Tag the package version
+
+on:
+  workflow_call:
+    inputs:
+      tag-prefix:
+        description: Text in front of the package.json version in the tag, `v` for `v1.2.3` or empty for `1.2.3`
+        type: string
+        default: v
+
+permissions:
+  contents: write
+
+jobs:
+  tag:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Tag the version in package.json
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_PREFIX: ${{ inputs.tag-prefix }}
+        run: |
+          tag="${TAG_PREFIX}$(jq -r .version package.json)"
+          if gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${tag}" > /dev/null 2>&1; then
+            echo "${tag} already exists, so the version in package.json has not changed. Tags are never moved."
+            exit 0
+          fi
+          gh api "repos/${GITHUB_REPOSITORY}/git/refs" -f ref="refs/tags/${tag}" -f sha="${GITHUB_SHA}" > /dev/null
+          echo "Tagged ${GITHUB_SHA} as ${tag}"
