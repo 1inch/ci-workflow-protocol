@@ -1,8 +1,12 @@
-name: Hardhat CI
+name: Foundry CI
 
 on:
   workflow_call:
     inputs:
+      foundry-version:
+        description: Foundry version that every job installs
+        type: string
+        default: v1.5.1
       profile:
         description: Build profile that `yarn test` uses, for the artifact cache key
         type: string
@@ -20,7 +24,7 @@ on:
         type: boolean
         default: false
       typecheck:
-        description: Run `yarn typecheck` in the `test` job, after the tests have generated the types
+        description: Run `yarn typecheck` in the `test` job, after the tests
         type: boolean
         default: false
       coverage:
@@ -41,9 +45,13 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: $/.github/actions/setup
-
-      - uses: $/.github/actions/hardhat
         with:
+          submodules: recursive
+
+      - uses: $/.github/actions/foundry
+        with:
+          version: ${{ inputs.foundry-version }}
+          cache: true
           profile: ${{ inputs.profile }}
           sources: ${{ inputs.sources }}
 
@@ -60,6 +68,12 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: $/.github/actions/setup
+        with:
+          submodules: recursive
+
+      - uses: $/.github/actions/foundry
+        with:
+          version: ${{ inputs.foundry-version }}
 
       - name: Run snapshot check
         run: yarn snapshot:check
@@ -70,6 +84,12 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: $/.github/actions/setup
+        with:
+          submodules: recursive
+
+      - uses: $/.github/actions/foundry
+        with:
+          version: ${{ inputs.foundry-version }}
 
       - name: Run linter
         run: yarn lint
@@ -80,6 +100,12 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: $/.github/actions/setup
+        with:
+          submodules: recursive
+
+      - uses: $/.github/actions/foundry
+        with:
+          version: ${{ inputs.foundry-version }}
 
       - name: Run coverage
         run: yarn coverage

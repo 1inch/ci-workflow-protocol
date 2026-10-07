@@ -4,10 +4,15 @@ Shared GitHub Actions workflows and the release flow of the 1inch contract repos
 
 - [RELEASE_FLOW.md](RELEASE_FLOW.md): branches, versions, tags and deployment artifacts.
 - [.github/workflows](.github/workflows): reusable workflows. Each repository keeps only short callers, plus any job that only it needs.
+- [.github/actions](.github/actions): the steps the CI workflows share.
+  - [setup](.github/actions/setup/action.yml) starts every job. It checks out the commit under test without persisted credentials, sets up Node.js 24 with the Yarn cache and runs `yarn install --frozen-lockfile`.
+  - [hardhat](.github/actions/hardhat/action.yml) restores and saves Hardhat's build cache in the `test` job of `hardhat-ci.yml`.
+  - [foundry](.github/actions/foundry/action.yml) installs Foundry in every job of `foundry-ci.yml` and caches its build output in the `test` job.
 
 | Shared workflow | Caller in the repository | What it does |
 |---|---|---|
-| `hardhat-ci.yml` | `ci.yml` | `yarn test`, plus `yarn typecheck`, `yarn snapshot:check`, `yarn lint` and `yarn coverage` where enabled |
+| `hardhat-ci.yml` | `ci.yml` in a Hardhat repository | `yarn test`, plus `yarn typecheck`, `yarn snapshot:check`, `yarn lint` and `yarn coverage` where enabled, with Hardhat's build cache |
+| `foundry-ci.yml` | `ci.yml` in a Foundry repository | The same jobs, with Foundry installed and its build output cached |
 | `check-version.yml` | `cpv.yml` | Fails a pull request into `release/X.Y.Z` that sets another version, or that arrives after the tag exists |
 | `tag.yml` | `tag.yml` | Tags the `package.json` version on the head of `release/X.Y.Z`, run by hand |
 | `release.yml` | `release.yml` | Creates the GitHub Release for the tag of the `package.json` version |
@@ -16,7 +21,7 @@ Shared GitHub Actions workflows and the release flow of the 1inch contract repos
 
 ## Versions
 
-Callers reference a release of this repository, such as `@v1.0.0`, and never a branch. A change merged here reaches a repository only when that repository merges a pull request that moves its callers to the release containing it. The change shows up as a commit in every repository, and moving the callers back reverts it.
+Callers reference a release of this repository, such as `@v1.1.0`, and never a branch. A change merged here reaches a repository only when that repository merges a pull request that moves its callers to the release containing it. The change shows up as a commit in every repository, and moving the callers back reverts it.
 
 The release, publish and tag workflows run with `contents: write`, `id-token: write` or `packages: write` in the calling repository. Because callers pin a release, a merge into `main` here does not change what can publish a package. Releases are immutable, so a published tag can be neither moved nor deleted.
 
@@ -27,10 +32,12 @@ To ship a change:
 3. Publish a release from `main`: a patch for a fix, a minor for a new input, a major for a change that callers have to adapt to. Immutable releases are enabled in this repository's settings, so the tag cannot move:
 
    ```bash
-   gh release create v1.0.1 --repo 1inch/ci-workflow-protocol --target main --generate-notes
+   gh release create v1.1.1 --repo 1inch/ci-workflow-protocol --target main --generate-notes
    ```
 
-4. In each repository, open a pull request that moves every caller to the new tag. A repository's callers always reference the same release.
+4. In each repository, open a pull request that moves every caller to the new tag. Everything a repository references here, its callers and the actions alike, names the same release.
+
+The CI workflows call their actions as `$/.github/actions/...`. GitHub resolves `$/` to this repository at the commit that is running, so a caller pinned to a release also runs the actions of that release.
 
 ## CI
 
@@ -52,7 +59,7 @@ permissions:
 
 jobs:
   ci:
-    uses: 1inch/ci-workflow-protocol/.github/workflows/hardhat-ci.yml@v1.0.0
+    uses: 1inch/ci-workflow-protocol/.github/workflows/hardhat-ci.yml@v1.1.0
     with:
       profile: default
       sources: contracts
@@ -60,14 +67,22 @@ jobs:
       lint: true
 ```
 
+A Foundry repository calls `foundry-ci.yml` in the same way. Both workflows take the same inputs, and `foundry-ci.yml` also takes `foundry-version`.
+
 | Input | Type | Default | Meaning |
 |---|---|---|---|
+| `foundry-version` | string | `v1.5.1` | `foundry-ci.yml` only: the Foundry version every job installs |
 | `profile` | string | `default` | Build profile that `yarn test` uses, for the artifact cache key |
 | `sources` | string | `contracts` | Contract source directory, for the artifact cache key |
 | `snapshot` | boolean | `false` | Run the `snapshot` job, `yarn snapshot:check`. Enable it where gas snapshots are tracked |
 | `lint` | boolean | `false` | Run the `lint` job, `yarn lint`. Enable it where a linter is configured |
 | `typecheck` | boolean | `false` | Run `yarn typecheck` in the `test` job, after `yarn test` has generated the types. Enable it where the repository has a `typecheck` script |
 | `coverage` | boolean | `false` | Run the `coverage` job, `yarn coverage`, and upload the report to Codecov. Enable it where the repository is set up on Codecov |
+
+Both workflows run the same jobs on the repository's own `package.json` scripts, so what a repository runs behind `yarn test` or `yarn lint` is its own choice. They differ only in the toolchain step:
+
+- In `hardhat-ci.yml`, the `test` job restores and saves `artifacts` and `cache` through `.github/actions/hardhat`, under a key of `profile`, `hardhat.config.ts`, `yarn.lock` and `<sources>/**/*.sol`.
+- In `foundry-ci.yml`, every job checks out submodules and installs Foundry through `.github/actions/foundry`. The `test` job also caches `out` and `cache`, under a key of `profile`, `foundry.toml`, `foundry.lock`, `remappings.txt`, `yarn.lock` and `<sources>/**/*.sol`.
 
 With `coverage: true`, the caller also passes the Codecov token:
 
@@ -85,7 +100,7 @@ A check that only one repository needs stays in that repository, as a plain job 
 ```yaml
 jobs:
   ci:
-    uses: 1inch/ci-workflow-protocol/.github/workflows/hardhat-ci.yml@v1.0.0
+    uses: 1inch/ci-workflow-protocol/.github/workflows/hardhat-ci.yml@v1.1.0
     with:
       profile: default
       sources: contracts
@@ -100,30 +115,15 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
-          persist-credentials: false
+      - uses: 1inch/ci-workflow-protocol/.github/actions/setup@v1.1.0
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: 24
-          cache: yarn
-
-      - name: Install Foundry
-        uses: foundry-rs/foundry-toolchain@v1
-        with:
-          version: v1.5.1
-
-      - name: Install node modules
-        run: yarn install --frozen-lockfile
+      - uses: 1inch/ci-workflow-protocol/.github/actions/foundry@v1.1.0
 
       - name: Build the Foundry deployers
         run: yarn deployers:foundry && forge build
 ```
 
-The job runs on the caller's triggers, concurrency and read-only permissions, and reports as `forge-build` next to `ci / test` and the other shared checks. Require it on `main` like them. Like the shared jobs, it checks out the pull request's head without persisted credentials. When a second repository needs the same check, it moves into the shared workflow as an optional input.
+The job runs on the caller's triggers, concurrency and read-only permissions, and reports as `forge-build` next to `ci / test` and the other shared checks. Require it on `main` like them. It reuses the shared setup and Foundry actions at the same release as the `ci` job, so it installs the same Foundry version as `foundry-ci.yml`. From another repository an action takes the full path and the tag, because `$/` would point at the calling repository. When a second repository needs the same check, it moves into the shared workflow as an optional input.
 
 ## Releases
 
@@ -144,7 +144,7 @@ permissions:
 
 jobs:
   check-package-version:
-    uses: 1inch/ci-workflow-protocol/.github/workflows/check-version.yml@v1.0.0
+    uses: 1inch/ci-workflow-protocol/.github/workflows/check-version.yml@v1.1.0
 ```
 
 A pull request into `release/X.Y.Z` fails when it sets `package.json` to a version other than `X.Y.Z`, and once the tag `vX.Y.Z` exists, because the branch is then frozen. A pull request that leaves the version as it is passes; `TAG` takes the version from `package.json` when the release is ready.
@@ -163,7 +163,7 @@ permissions:
 
 jobs:
   tag:
-    uses: 1inch/ci-workflow-protocol/.github/workflows/tag.yml@v1.0.0
+    uses: 1inch/ci-workflow-protocol/.github/workflows/tag.yml@v1.1.0
 ```
 
 | Input | Type | Default | Meaning |
@@ -186,7 +186,7 @@ permissions:
 
 jobs:
   release:
-    uses: 1inch/ci-workflow-protocol/.github/workflows/release.yml@v1.0.0
+    uses: 1inch/ci-workflow-protocol/.github/workflows/release.yml@v1.1.0
     with:
       tag-prefix: v
       changelog: false
@@ -214,7 +214,7 @@ permissions:
 
 jobs:
   npm:
-    uses: 1inch/ci-workflow-protocol/.github/workflows/publish.yml@v1.0.0
+    uses: 1inch/ci-workflow-protocol/.github/workflows/publish.yml@v1.1.0
 ```
 
 To also publish to GitHub Packages, give each job its own permissions, so the npm job never holds `packages: write` and the GitHub Packages job never holds `id-token: write`:
@@ -228,13 +228,13 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: 1inch/ci-workflow-protocol/.github/workflows/publish.yml@v1.0.0
+    uses: 1inch/ci-workflow-protocol/.github/workflows/publish.yml@v1.1.0
 
   github-packages:
     permissions:
       contents: read
       packages: write
-    uses: 1inch/ci-workflow-protocol/.github/workflows/publish-github-packages.yml@v1.0.0
+    uses: 1inch/ci-workflow-protocol/.github/workflows/publish-github-packages.yml@v1.1.0
 ```
 
 npm publishing uses [trusted publishing](https://docs.npmjs.com/trusted-publishers/), so no npm token is stored anywhere. Before the first run, a package admin adds a trusted publisher in the package settings on npmjs.com:

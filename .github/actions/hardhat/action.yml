@@ -1,0 +1,23 @@
+name: Hardhat cache
+description: Restore and save Hardhat's artifacts and cache, keyed by the build profile, hardhat.config.ts, yarn.lock and the contract sources
+
+inputs:
+  profile:
+    description: Build profile that `yarn test` uses, for the artifact cache key
+    default: default
+  sources:
+    description: Contract source directory, for the artifact cache key
+    default: contracts
+
+runs:
+  using: composite
+  steps:
+    - name: Cache Hardhat artifacts
+      uses: actions/cache@v4
+      with:
+        path: |
+          artifacts
+          cache
+        key: hh-${{ runner.os }}-${{ inputs.profile }}-${{ hashFiles('hardhat.config.ts', 'yarn.lock', format('{0}/**/*.sol', inputs.sources)) }}
+        restore-keys: |
+          hh-${{ runner.os }}-${{ inputs.profile }}-

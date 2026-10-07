@@ -1,0 +1,35 @@
+name: Foundry
+description: Install the Foundry toolchain and, where asked, restore and save Foundry's build output, keyed by the build profile, foundry.toml, foundry.lock, remappings.txt, yarn.lock and the contract sources
+
+inputs:
+  version:
+    description: Foundry version to install
+    default: v1.5.1
+  cache:
+    description: Restore and save `out` and `cache`, `true` or `false`
+    default: 'false'
+  profile:
+    description: Build profile that `yarn test` uses, for the artifact cache key
+    default: default
+  sources:
+    description: Contract source directory, for the artifact cache key
+    default: contracts
+
+runs:
+  using: composite
+  steps:
+    - name: Install Foundry
+      uses: foundry-rs/foundry-toolchain@v1
+      with:
+        version: ${{ inputs.version }}
+
+    - name: Cache Foundry artifacts
+      if: ${{ inputs.cache == 'true' }}
+      uses: actions/cache@v4
+      with:
+        path: |
+          out
+          cache
+        key: forge-${{ runner.os }}-${{ inputs.profile }}-${{ hashFiles('foundry.toml', 'foundry.lock', 'remappings.txt', 'yarn.lock', format('{0}/**/*.sol', inputs.sources)) }}
+        restore-keys: |
+          forge-${{ runner.os }}-${{ inputs.profile }}-

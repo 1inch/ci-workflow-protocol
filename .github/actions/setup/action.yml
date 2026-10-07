@@ -1,0 +1,26 @@
+name: Setup
+description: Check out the commit under test without persisted credentials, set up Node.js 24 with the Yarn cache, and install dependencies from the lockfile
+
+inputs:
+  submodules:
+    description: Check out submodules too, `true` or `recursive`
+    default: 'false'
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/checkout@v7
+      with:
+        ref: ${{ github.event.pull_request.head.sha }}
+        persist-credentials: false
+        submodules: ${{ inputs.submodules }}
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v6
+      with:
+        node-version: 24
+        cache: yarn
+
+    - name: Install node modules
+      shell: bash
+      run: yarn install --frozen-lockfile
