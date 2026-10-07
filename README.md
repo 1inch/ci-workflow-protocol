@@ -243,3 +243,5 @@ npm publishing uses [trusted publishing](https://docs.npmjs.com/trusted-publishe
 - workflow filename `publish.yml`, with `npm publish` allowed.
 
 For a reusable workflow npm checks the caller's filename, so the caller must be named `publish.yml`. The shared workflow has the same name, so the check passes whichever file npm reads. The package's `repository.url` in `package.json` must name the same repository.
+
+npm adds a trusted publisher only to a package that already exists, so a package admin publishes a new package's first version by hand, from its tag, with `"publishConfig": { "access": "public" }` in `package.json` for a scoped package. A trusted publisher that has not published within two days expires, so add it right before the first publish from CI. Trusted publishers created since 2026-09-03 allow only `npm stage publish` unless `npm publish` is also selected, and this workflow runs `npm publish`.
