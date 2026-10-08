@@ -36,7 +36,8 @@ jobs:
               ;;
           esac
           tag="${TAG_PREFIX}${expected}"
-          if gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${tag}" > /dev/null 2>&1; then
+          existing=$(git ls-remote --tags origin "refs/tags/${tag}")
+          if [ -n "$existing" ]; then
             echo "::error::${tag} already exists, so ${BASE_REF} is frozen. Further changes go into a new release branch"
             exit 1
           fi

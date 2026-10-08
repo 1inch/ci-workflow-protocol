@@ -31,9 +31,10 @@ jobs:
             exit 1
           fi
           tag="${TAG_PREFIX}${version}"
-          if gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${tag}" > /dev/null 2>&1; then
+          existing=$(git ls-remote --tags origin "refs/tags/${tag}")
+          if [ -n "$existing" ]; then
             echo "${tag} already exists, so the version in package.json has not changed. Tags are never moved."
             exit 0
           fi
-          gh api "repos/${GITHUB_REPOSITORY}/git/refs" -f ref="refs/tags/${tag}" -f sha="${GITHUB_SHA}" > /dev/null
+          gh api "repos/${GITHUB_REPOSITORY}/git/refs" -f ref="refs/tags/${tag}" -f sha="${GITHUB_SHA}" --silent
           echo "Tagged ${GITHUB_SHA} as ${tag}"

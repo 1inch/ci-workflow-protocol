@@ -31,7 +31,8 @@ jobs:
         run: |
           version=$(jq -r .version package.json)
           tag="${TAG_PREFIX}${version}"
-          if ! git rev-parse -q --verify "refs/tags/${tag}" > /dev/null; then
+          existing=$(git ls-remote --tags origin "refs/tags/${tag}")
+          if [ -z "$existing" ]; then
             echo "::error::Tag ${tag} does not exist. Run TAG from release/${version} before creating the release"
             exit 1
           fi
