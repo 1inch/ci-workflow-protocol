@@ -16,6 +16,8 @@ jobs:
   npm:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    # The package's trusted publisher names this environment, which allows only v* tags.
+    environment: npm
     steps:
       - uses: actions/checkout@v7
         with:

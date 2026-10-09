@@ -104,6 +104,14 @@ check() {
   fi
 }
 
+environment=$(ruby -ryaml -e 'print YAML.load_file(ARGV[0])["jobs"]["npm"]["environment"].to_s' "$workflows/publish.yml")
+if [ "$environment" = npm ]; then
+  echo "ok   PUBLISH runs in the npm environment"
+else
+  echo "FAIL PUBLISH runs in the npm environment: got \"$environment\""
+  failures=$((failures + 1))
+fi
+
 tag_steps=("Check the release branch" "Check CI on the branch head" "Tag the version in package.json")
 tagged='git/refs -f ref=refs/tags/v7\.0\.1 '
 

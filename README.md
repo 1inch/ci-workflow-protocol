@@ -21,7 +21,7 @@ Shared GitHub Actions workflows and the release flow of the 1inch contract repos
 
 Callers reference a release of this repository, such as `@v2.0.0`, and never a branch. A change merged here reaches a repository only when that repository merges a pull request that moves its callers to the release containing it. The change shows up as a commit in every repository, and moving the callers back reverts it.
 
-The release, publish and tag workflows run with `contents: write` or `id-token: write` in the calling repository. Because callers pin a release, a merge into `main` here does not change what can publish a package. Releases are immutable, so a published tag can be neither moved nor deleted.
+The release, publish and tag workflows run with `contents: write` or `id-token: write` in the calling repository. Because callers pin a release, a merge into `main` here does not change what can publish a package. Releases are immutable, so a published tag can be neither moved nor deleted, and a tag ruleset lets only repository admins create, move or delete `v*` tags, which covers a tag before its release is published. A caller references a tag only once its release is published.
 
 To ship a change:
 
@@ -202,10 +202,18 @@ The workflow runs only from the tag made of `tag-prefix` (`v` by default) and th
 
 A pre-release goes to the `next` dist-tag, and every other version becomes `latest`.
 
+The job runs in the calling repository's `npm` environment. Create it in the repository settings before the first run, because GitHub creates an unprotected environment on first use:
+
+- deployment branches and tags: only the tag pattern `v*`;
+- required reviewers: the repository's maintainers, so every publish waits for an approval.
+
 npm publishing uses [trusted publishing](https://docs.npmjs.com/trusted-publishers/), so no npm token is stored anywhere. Before the first run, a package admin adds a trusted publisher in the package settings on npmjs.com:
 
 - organization `1inch` and the repository's name;
-- workflow filename `publish.yml`, with `npm publish` allowed.
+- workflow filename `publish.yml`, with `npm publish` allowed;
+- environment `npm`.
+
+`workflow_dispatch` runs the caller file of the ref it is started from, so someone with write access could push a branch with a rewritten `publish.yml` that skips the tag check. The environment is what such a file cannot get around: npm refuses a publish from outside `npm`, and GitHub does not start a job in `npm` from a branch.
 
 For a reusable workflow npm checks the caller's filename, so the caller must be named `publish.yml`. The shared workflow has the same name, so the check passes whichever file npm reads. The package's `repository.url` in `package.json` must name the same repository.
 
