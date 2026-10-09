@@ -10,6 +10,7 @@ on:
 
 permissions:
   contents: write
+  actions: read
 
 jobs:
   tag:
@@ -20,9 +21,8 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Tag the version in package.json
+      - name: Check the release branch
         env:
-          GH_TOKEN: ${{ github.token }}
           TAG_PREFIX: ${{ inputs.tag-prefix }}
         run: |
           version=$(jq -r .version package.json)
@@ -30,11 +30,22 @@ jobs:
             echo "::error::Run TAG from release/${version}, the release branch of the version in package.json, not from ${GITHUB_REF_NAME}"
             exit 1
           fi
-          tag="${TAG_PREFIX}${version}"
-          existing=$(git ls-remote --tags origin "refs/tags/${tag}")
-          if [ -n "$existing" ]; then
-            echo "${tag} already exists, so the version in package.json has not changed. Tags are never moved."
-            exit 0
+          echo "VERSION=${version}" >> "$GITHUB_ENV"
+          echo "TAG=${TAG_PREFIX}${version}" >> "$GITHUB_ENV"
+
+      - name: Check CI on the branch head
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ci=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs?head_sha=${GITHUB_SHA}&event=push" --jq '[.workflow_runs[] | select(.name == "CI")] | first | if . == null then "missing" else (.conclusion // .status) end')
+          if [ "$ci" != "success" ]; then
+            echo "::error::CI on ${GITHUB_SHA} is ${ci}. Run TAG once CI has passed on release/${VERSION}"
+            exit 1
           fi
-          gh api "repos/${GITHUB_REPOSITORY}/git/refs" -f ref="refs/tags/${tag}" -f sha="${GITHUB_SHA}" --silent
-          echo "Tagged ${GITHUB_SHA} as ${tag}"
+
+      - name: Tag the version in package.json
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api "repos/${GITHUB_REPOSITORY}/git/refs" -f ref="refs/tags/${TAG}" -f sha="${GITHUB_SHA}" --silent
+          echo "Tagged ${GITHUB_SHA} as ${TAG}"

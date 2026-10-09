@@ -2,6 +2,11 @@ name: Publish to npm
 
 on:
   workflow_call:
+    inputs:
+      tag-prefix:
+        description: Text in front of the package.json version in the tag, `v` for `v1.2.3` or empty for `1.2.3`
+        type: string
+        default: v
 
 permissions:
   contents: read
@@ -16,6 +21,17 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Check the release tag
+        env:
+          TAG_PREFIX: ${{ inputs.tag-prefix }}
+        run: |
+          version=$(jq -r .version package.json)
+          tag="${TAG_PREFIX}${version}"
+          if [ "$GITHUB_REF" != "refs/tags/${tag}" ]; then
+            echo "::error::Run PUBLISH from the tag ${tag}, not from ${GITHUB_REF_NAME}"
+            exit 1
+          fi
+
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
@@ -27,4 +43,10 @@ jobs:
         run: yarn install --frozen-lockfile
 
       - name: Publish
-        run: npm publish
+        # npm publishes a pre-release only with an explicit --tag.
+        run: |
+          if [[ "$(jq -r .version package.json)" == *-* ]]; then
+            npm publish --tag next
+          else
+            npm publish
+          fi

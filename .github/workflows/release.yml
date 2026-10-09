@@ -31,9 +31,8 @@ jobs:
         run: |
           version=$(jq -r .version package.json)
           tag="${TAG_PREFIX}${version}"
-          existing=$(git ls-remote --tags origin "refs/tags/${tag}")
-          if [ -z "$existing" ]; then
-            echo "::error::Tag ${tag} does not exist. Run TAG from release/${version} before creating the release"
+          if [ "$GITHUB_REF" != "refs/tags/${tag}" ]; then
+            echo "::error::Run CREATE_RELEASE from the tag ${tag}, not from ${GITHUB_REF_NAME}. TAG creates the tag from release/${version}"
             exit 1
           fi
           echo "VERSION=${version}" >> "$GITHUB_ENV"
@@ -79,5 +78,3 @@ jobs:
           body: ${{ steps.changelog.outputs.notes }}
           generate_release_notes: ${{ !inputs.changelog }}
           prerelease: ${{ contains(env.VERSION, '-') }}
-          # A patch for an older line must not replace a newer release as "Latest".
-          make_latest: legacy

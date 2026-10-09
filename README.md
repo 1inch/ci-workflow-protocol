@@ -13,17 +13,15 @@ Shared GitHub Actions workflows and the release flow of the 1inch contract repos
 |---|---|---|
 | `hardhat-ci.yml` | `ci.yml` in a Hardhat repository | `yarn test`, plus `yarn typecheck`, `yarn snapshot:check`, `yarn lint` and `yarn coverage` where enabled, with Hardhat's build cache |
 | `foundry-ci.yml` | `ci.yml` in a Foundry repository | The same jobs, with Foundry installed and its build output cached |
-| `check-version.yml` | `cpv.yml` | Fails a pull request into `release/X.Y.Z` that sets another version, or that arrives after the tag exists |
 | `tag.yml` | `tag.yml` | Tags the `package.json` version on the head of `release/X.Y.Z`, run by hand |
 | `release.yml` | `release.yml` | Creates the GitHub Release for the tag of the `package.json` version |
 | `publish.yml` | `publish.yml` | Publishes the package to npm with trusted publishing |
-| `publish-github-packages.yml` | `publish.yml` | Publishes the package to GitHub Packages |
 
 ## Versions
 
 Callers reference a release of this repository, such as `@v1.1.0`, and never a branch. A change merged here reaches a repository only when that repository merges a pull request that moves its callers to the release containing it. The change shows up as a commit in every repository, and moving the callers back reverts it.
 
-The release, publish and tag workflows run with `contents: write`, `id-token: write` or `packages: write` in the calling repository. Because callers pin a release, a merge into `main` here does not change what can publish a package. Releases are immutable, so a published tag can be neither moved nor deleted.
+The release, publish and tag workflows run with `contents: write` or `id-token: write` in the calling repository. Because callers pin a release, a merge into `main` here does not change what can publish a package. Releases are immutable, so a published tag can be neither moved nor deleted.
 
 To ship a change:
 
@@ -48,7 +46,7 @@ name: CI
 on:
   pull_request:
   push:
-    branches: [main, 'release/**']
+    branches: [main]
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -127,27 +125,7 @@ The job runs on the caller's triggers, concurrency and read-only permissions, an
 
 ## Releases
 
-Every repository follows [RELEASE_FLOW.md](RELEASE_FLOW.md) and has the version check, the tag and the GitHub Release workflows. Repositories that publish an npm package also have the publish workflow.
-
-### Version check
-
-`.github/workflows/cpv.yml`, on pull requests into a release branch:
-
-```yaml
-name: CHECK_PACKAGE_VERSION
-on:
-  pull_request:
-    branches: ['release/**']
-
-permissions:
-  contents: read
-
-jobs:
-  check-package-version:
-    uses: 1inch/ci-workflow-protocol/.github/workflows/check-version.yml@v1.1.0
-```
-
-A pull request into `release/X.Y.Z` fails when it sets `package.json` to a version other than `X.Y.Z`, and once the tag `vX.Y.Z` exists, because the branch is then frozen. A pull request that leaves the version as it is passes; `TAG` takes the version from `package.json` when the release is ready.
+Every repository follows [RELEASE_FLOW.md](RELEASE_FLOW.md) and has the tag, the GitHub Release and the publish workflows. A release branch is cut from `main` and never changes, so no workflow runs on pull requests into it.
 
 ### Tag
 
@@ -160,6 +138,7 @@ on:
 
 permissions:
   contents: write
+  actions: read
 
 jobs:
   tag:
@@ -168,13 +147,15 @@ jobs:
 
 | Input | Type | Default | Meaning |
 |---|---|---|---|
-| `tag-prefix` | string | `v` | Text in front of the `package.json` version in the tag. The release flow uses `v`; the version check and the GitHub Release workflow take the same input |
+| `tag-prefix` | string | `v` | Text in front of the `package.json` version in the tag. The release flow uses `v`; the GitHub Release and the publish workflows take the same input |
 
-When the tag already exists, the version has not changed and the workflow does nothing: it never moves a tag. A tag created this way does not start other workflows, so `CREATE_RELEASE` and `PUBLISH` are run by hand from it.
+It also refuses a commit without a passed `CI` run from its push to `main`. `actions: read` lets it read that run, so the repository's CI workflow must be named `CI`, as the caller above is.
+
+When the tag already exists, GitHub refuses to create it again and the run fails, so a tag is never moved. A tag created this way does not start other workflows, so `CREATE_RELEASE` and `PUBLISH` are run by hand from it.
 
 ### GitHub Release
 
-`.github/workflows/release.yml`, run by hand once the tag exists:
+`.github/workflows/release.yml`, run by hand from the tag:
 
 ```yaml
 name: CREATE_RELEASE
@@ -197,7 +178,7 @@ jobs:
 | `tag-prefix` | string | `v` | Text in front of the `package.json` version in the tag: `v` for `v1.2.3`, empty for `1.2.3` |
 | `changelog` | boolean | `false` | Take the notes from `yarn changelog --stdout`, where each release starts with a `<repository>/<version> (<date>)` line, as solidity-utils' auto-changelog template writes it. Otherwise GitHub generates the notes from the merged pull requests |
 
-The tag must exist: the workflow fails without it and never creates or moves a tag. A version with a pre-release part, such as `2.2.0-rc.1`, becomes a pre-release.
+The workflow runs only from the tag made of `tag-prefix` and the `package.json` version, so the tag already exists. Started from a branch or another tag, it fails. It never creates or moves a tag. A version with a pre-release part, such as `2.2.0-rc.1`, becomes a pre-release.
 
 ### npm
 
@@ -213,29 +194,13 @@ permissions:
   id-token: write
 
 jobs:
-  npm:
+  publish-npmjs:
     uses: 1inch/ci-workflow-protocol/.github/workflows/publish.yml@v1.1.0
 ```
 
-To also publish to GitHub Packages, give each job its own permissions, so the npm job never holds `packages: write` and the GitHub Packages job never holds `id-token: write`:
+The workflow runs only from the tag made of `tag-prefix` (`v` by default) and the `package.json` version, and fails without publishing when started from a branch or another tag. Packages go to npm only, not to GitHub Packages.
 
-```yaml
-permissions:
-  contents: read
-
-jobs:
-  npm:
-    permissions:
-      contents: read
-      id-token: write
-    uses: 1inch/ci-workflow-protocol/.github/workflows/publish.yml@v1.1.0
-
-  github-packages:
-    permissions:
-      contents: read
-      packages: write
-    uses: 1inch/ci-workflow-protocol/.github/workflows/publish-github-packages.yml@v1.1.0
-```
+A pre-release goes to the `next` dist-tag, and every other version becomes `latest`.
 
 npm publishing uses [trusted publishing](https://docs.npmjs.com/trusted-publishers/), so no npm token is stored anywhere. Before the first run, a package admin adds a trusted publisher in the package settings on npmjs.com:
 
