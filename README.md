@@ -26,7 +26,7 @@ The release, publish and tag workflows run with `contents: write` or `id-token: 
 To ship a change:
 
 1. Try it from a branch first, by pointing one repository's pull request at that branch. Keep inputs backward-compatible: a new input is optional and defaults to the old behaviour.
-2. Merge it into `main` through a reviewed pull request.
+2. Merge it into `main` through a reviewed pull request. The `Self-test` workflow runs `test/release-workflows.sh` on it, which runs the steps of the tag, release and publish workflows against fixed scenarios with `gh` and `npm` stubbed. Run it locally with `bash test/release-workflows.sh`; it needs `jq` and `ruby`.
 3. Publish a release from `main`: a patch for a fix, a minor for a new input, a major for a change that callers have to adapt to. Immutable releases are enabled in this repository's settings, so the tag cannot move:
 
    ```bash

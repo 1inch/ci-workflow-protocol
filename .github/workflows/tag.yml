@@ -39,7 +39,7 @@ jobs:
         run: |
           ci=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs?head_sha=${GITHUB_SHA}&event=push" --jq '[.workflow_runs[] | select(.name == "CI")] | first | if . == null then "missing" else (.conclusion // .status) end')
           if [ "$ci" != "success" ]; then
-            echo "::error::CI on ${GITHUB_SHA} is ${ci}. Run TAG once CI has passed on release/${VERSION}"
+            echo "::error::CI on ${GITHUB_SHA} is ${ci}. Run TAG once CI has passed on this commit in main"
             exit 1
           fi
 
