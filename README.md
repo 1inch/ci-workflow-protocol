@@ -19,7 +19,7 @@ Shared GitHub Actions workflows and the release flow of the 1inch contract repos
 
 ## Versions
 
-Callers reference a release of this repository, such as `@v1.1.0`, and never a branch. A change merged here reaches a repository only when that repository merges a pull request that moves its callers to the release containing it. The change shows up as a commit in every repository, and moving the callers back reverts it.
+Callers reference a release of this repository, such as `@v2.0.0`, and never a branch. A change merged here reaches a repository only when that repository merges a pull request that moves its callers to the release containing it. The change shows up as a commit in every repository, and moving the callers back reverts it.
 
 The release, publish and tag workflows run with `contents: write` or `id-token: write` in the calling repository. Because callers pin a release, a merge into `main` here does not change what can publish a package. Releases are immutable, so a published tag can be neither moved nor deleted.
 
@@ -30,7 +30,7 @@ To ship a change:
 3. Publish a release from `main`: a patch for a fix, a minor for a new input, a major for a change that callers have to adapt to. Immutable releases are enabled in this repository's settings, so the tag cannot move:
 
    ```bash
-   gh release create v1.1.1 --repo 1inch/ci-workflow-protocol --target main --generate-notes
+   gh release create v2.0.1 --repo 1inch/ci-workflow-protocol --target main --generate-notes
    ```
 
 4. In each repository, open a pull request that moves every caller to the new tag. Everything a repository references here, its callers and the actions alike, names the same release.
@@ -57,7 +57,7 @@ permissions:
 
 jobs:
   ci:
-    uses: 1inch/ci-workflow-protocol/.github/workflows/hardhat-ci.yml@v1.1.0
+    uses: 1inch/ci-workflow-protocol/.github/workflows/hardhat-ci.yml@v2.0.0
     with:
       profile: default
       sources: contracts
@@ -98,7 +98,7 @@ A check that only one repository needs stays in that repository, as a plain job 
 ```yaml
 jobs:
   ci:
-    uses: 1inch/ci-workflow-protocol/.github/workflows/hardhat-ci.yml@v1.1.0
+    uses: 1inch/ci-workflow-protocol/.github/workflows/hardhat-ci.yml@v2.0.0
     with:
       profile: default
       sources: contracts
@@ -113,9 +113,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: 1inch/ci-workflow-protocol/.github/actions/setup@v1.1.0
+      - uses: 1inch/ci-workflow-protocol/.github/actions/setup@v2.0.0
 
-      - uses: 1inch/ci-workflow-protocol/.github/actions/foundry@v1.1.0
+      - uses: 1inch/ci-workflow-protocol/.github/actions/foundry@v2.0.0
 
       - name: Build the Foundry deployers
         run: yarn deployers:foundry && forge build
@@ -142,7 +142,7 @@ permissions:
 
 jobs:
   tag:
-    uses: 1inch/ci-workflow-protocol/.github/workflows/tag.yml@v1.1.0
+    uses: 1inch/ci-workflow-protocol/.github/workflows/tag.yml@v2.0.0
 ```
 
 | Input | Type | Default | Meaning |
@@ -167,7 +167,7 @@ permissions:
 
 jobs:
   release:
-    uses: 1inch/ci-workflow-protocol/.github/workflows/release.yml@v1.1.0
+    uses: 1inch/ci-workflow-protocol/.github/workflows/release.yml@v2.0.0
     with:
       tag-prefix: v
       changelog: false
@@ -195,7 +195,7 @@ permissions:
 
 jobs:
   publish-npmjs:
-    uses: 1inch/ci-workflow-protocol/.github/workflows/publish.yml@v1.1.0
+    uses: 1inch/ci-workflow-protocol/.github/workflows/publish.yml@v2.0.0
 ```
 
 The workflow runs only from the tag made of `tag-prefix` (`v` by default) and the `package.json` version, and fails without publishing when started from a branch or another tag. Packages go to npm only, not to GitHub Packages.
