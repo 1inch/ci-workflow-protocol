@@ -46,7 +46,7 @@ name: CI
 on:
   pull_request:
   push:
-    branches: [main]
+    branches: [main, 'release/*']
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -89,7 +89,7 @@ With `coverage: true`, the caller also passes the Codecov token:
       CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 ```
 
-The checks are reported as `ci / test`, `ci / snapshot`, `ci / lint` and `ci / coverage`; require exactly the ones a repository runs on `main`, plus its own jobs. Only the `coverage` job reads a secret. A failed upload does not fail the job, so pull requests from forks, which get no secrets, still pass CI.
+The checks are reported as `ci / test`, `ci / snapshot`, `ci / lint` and `ci / coverage`; require exactly the ones a repository runs, plus its own jobs, on `main` and `release/*`. Only the `coverage` job reads a secret. A failed upload does not fail the job, so pull requests from forks, which get no secrets, still pass CI.
 
 ### Jobs of a repository's own
 
@@ -121,11 +121,11 @@ jobs:
         run: yarn deployers:foundry && forge build
 ```
 
-The job runs on the caller's triggers, concurrency and read-only permissions, and reports as `forge-build` next to `ci / test` and the other shared checks. Require it on `main` like them. It reuses the shared setup and Foundry actions at the same release as the `ci` job, so it installs the same Foundry version as `foundry-ci.yml`. From another repository an action takes the full path and the tag, because `$/` would point at the calling repository. When a second repository needs the same check, it moves into the shared workflow as an optional input.
+The job runs on the caller's triggers, concurrency and read-only permissions, and reports as `forge-build` next to `ci / test` and the other shared checks. Require it on `main` and `release/*` like them. It reuses the shared setup and Foundry actions at the same release as the `ci` job, so it installs the same Foundry version as `foundry-ci.yml`. From another repository an action takes the full path and the tag, because `$/` would point at the calling repository. When a second repository needs the same check, it moves into the shared workflow as an optional input.
 
 ## Releases
 
-Every repository follows [RELEASE_FLOW.md](RELEASE_FLOW.md) and has the tag, the GitHub Release and the publish workflows. A release branch is cut from `main` and never changes, so no workflow runs on pull requests into it.
+Every repository follows [RELEASE_FLOW.md](RELEASE_FLOW.md) and has the tag, the GitHub Release and the publish workflows. A release branch takes its release's fixes through pull requests until the tag, so `CI` runs on pull requests into it and on pushes to it, as the caller above sets up.
 
 ### Tag
 
@@ -149,7 +149,7 @@ jobs:
 |---|---|---|---|
 | `tag-prefix` | string | `v` | Text in front of the `package.json` version in the tag. The release flow uses `v`; the GitHub Release and the publish workflows take the same input |
 
-It also refuses a commit without a passed `CI` run from its push to `main`. `actions: read` lets it read that run, so the repository's CI workflow must be named `CI`, as the caller above is.
+It also refuses a commit without a passed `CI` run from its push, to `main` or to the release branch. `actions: read` lets it read that run, so the repository's CI workflow must be named `CI`, as the caller above is.
 
 When the tag already exists, GitHub refuses to create it again and the run fails, so a tag is never moved. A tag created this way does not start other workflows, so `CREATE_RELEASE` and `PUBLISH` are run by hand from it.
 
