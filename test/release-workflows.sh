@@ -151,6 +151,18 @@ else
   failures=$((failures + 1))
 fi
 
+npm_actions_pinned=$(ruby -ryaml -e '
+  steps = YAML.load_file(ARGV[0])["jobs"]["npm"]["steps"]
+  found = steps.select { |step| step["uses"] }.all? { |step| step["uses"].match?(/@[0-9a-f]{40}$/) }
+  print found
+' "$workflows/publish.yml")
+if [ "$npm_actions_pinned" = true ]; then
+  echo "ok   PUBLISH npm job actions are SHA-pinned"
+else
+  echo "FAIL PUBLISH npm job has a mutable action reference"
+  failures=$((failures + 1))
+fi
+
 tag_steps=("Check the release branch" "Check CI on the branch head" "Tag the version in package.json")
 tagged='git/refs -f ref=refs/tags/v7\.0\.1 '
 

@@ -212,7 +212,7 @@ A pre-release goes to the `next` dist-tag, and every other version becomes `late
 The job runs in the calling repository's `npm` environment. Create it in the repository settings before the first run, because GitHub creates an unprotected environment on first use:
 
 - deployment branches and tags: only the tag pattern `v*`;
-- required reviewers: none.
+- required reviewers: the DevOps team, with self-review disabled.
 
 Package installation and packing run in a separate build job with read-only repository and Actions permissions. The npm job receives only the packed tarball, has no checkout or install step, and alone gets `id-token: write`.
 
