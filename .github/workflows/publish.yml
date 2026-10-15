@@ -7,20 +7,25 @@ on:
         description: Text in front of the package.json version in the tag, `v` for `v1.2.3` or empty for `1.2.3`
         type: string
         default: v
+      dry-run:
+        description: Run npm publish without publishing the package
+        type: boolean
+        default: false
 
 permissions:
   contents: read
-  id-token: write
 
 jobs:
-  npm:
+  build:
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    # The package's trusted publisher names this environment, which allows only v* tags.
-    environment: npm
+    permissions:
+      actions: read
+      contents: read
     steps:
       - uses: actions/checkout@v7
         with:
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Check the release tag
@@ -33,7 +38,53 @@ jobs:
             echo "::error::Run PUBLISH from the tag ${tag}, not from ${GITHUB_REF_NAME}"
             exit 1
           fi
+          echo "VERSION=${version}" >> "$GITHUB_ENV"
 
+      - name: Check the release branch
+        run: |
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" "origin/release/${VERSION}"; then
+            echo "::error::Tag commit ${GITHUB_SHA} is not on release/${VERSION}"
+            exit 1
+          fi
+
+      - name: Check CI on the tag commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ci=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs?head_sha=${GITHUB_SHA}" --jq '[.workflow_runs[] | select(.name == "CI" and (.event == "push" or .event == "workflow_dispatch"))] | first | if . == null then "missing" else (.conclusion // .status) end')
+          if [ "$ci" != "success" ]; then
+            echo "::error::CI on ${GITHUB_SHA} is ${ci}. Run PUBLISH once CI has passed on this commit"
+            exit 1
+          fi
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          package-manager-cache: false
+
+      - name: Install node modules
+        run: yarn install --frozen-lockfile
+
+      - name: Pack
+        run: npm pack
+
+      - name: Upload package
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: npm-package
+          path: '*.tgz'
+          if-no-files-found: error
+
+  npm:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: npm
+    permissions:
+      contents: read
+      id-token: write
+    steps:
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
@@ -41,14 +92,23 @@ jobs:
           registry-url: https://registry.npmjs.org
           package-manager-cache: false
 
-      - name: Install node modules
-        run: yarn install --frozen-lockfile
+      - name: Download package
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0
+        with:
+          name: npm-package
+          path: package
 
       - name: Publish
-        # npm publishes a pre-release only with an explicit --tag.
+        env:
+          DRY_RUN: ${{ inputs.dry-run }}
         run: |
-          if [[ "$(jq -r .version package.json)" == *-* ]]; then
-            npm publish --tag next
-          else
-            npm publish
+          package=$(find package -type f -name '*.tgz' -print -quit)
+          version=$(tar -xOf "$package" package/package.json | jq -r .version)
+          args=("$package")
+          if [[ "$version" == *-* ]]; then
+            args+=(--tag next)
           fi
+          if [ "$DRY_RUN" = true ]; then
+            args+=(--dry-run)
+          fi
+          npm publish "${args[@]}"
