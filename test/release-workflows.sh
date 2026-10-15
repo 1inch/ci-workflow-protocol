@@ -202,10 +202,10 @@ ci_run failure
 check "PUBLISH rejects tag without passed CI" "Check CI on the tag commit" - publish.yml 7.0.1 refs/tags/v7.0.1 "${publish_build_steps[@]}"
 ci_run success workflow_dispatch
 check "PUBLISH accepts dispatched CI" ok - publish.yml 7.0.1 refs/tags/v7.0.1 "${publish_build_steps[@]}"
-check "PUBLISH from v7.0.1" ok '^npm publish package/package\.tgz $' publish.yml 7.0.1 refs/tags/v7.0.1 "Publish"
-check "PUBLISH a pre-release from v7.1.0-rc.1" ok '^npm publish package/package\.tgz --tag next $' publish.yml 7.1.0-rc.1 refs/tags/v7.1.0-rc.1 "Publish"
+check "PUBLISH from v7.0.1" ok '^npm publish \./package/package\.tgz $' publish.yml 7.0.1 refs/tags/v7.0.1 "Publish"
+check "PUBLISH a pre-release from v7.1.0-rc.1" ok '^npm publish \./package/package\.tgz --tag next $' publish.yml 7.1.0-rc.1 refs/tags/v7.1.0-rc.1 "Publish"
 dry_run=true
-check "PUBLISH dry-run" ok '^npm publish package/package\.tgz --dry-run $' publish.yml 7.0.1 refs/tags/v7.0.1 "Publish"
+check "PUBLISH dry-run" ok '^npm publish \./package/package\.tgz --dry-run $' publish.yml 7.0.1 refs/tags/v7.0.1 "Publish"
 dry_run=false
 check "PUBLISH from main" "Check the release tag" - publish.yml 7.0.1 refs/heads/main "Check the release tag" "Publish"
 

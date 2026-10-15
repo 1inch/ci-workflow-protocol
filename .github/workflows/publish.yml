@@ -102,7 +102,7 @@ jobs:
         env:
           DRY_RUN: ${{ inputs.dry-run }}
         run: |
-          package=$(find package -type f -name '*.tgz' -print -quit)
+          package=$(find ./package -type f -name '*.tgz' -print -quit)
           version=$(tar -xOf "$package" package/package.json | jq -r .version)
           args=("$package")
           if [[ "$version" == *-* ]]; then
