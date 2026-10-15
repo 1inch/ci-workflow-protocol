@@ -59,6 +59,8 @@ flowchart LR
 
 A patch of a deployed version starts from its tag: cut `release/X.Y.(Z+1)` from `vX.Y.Z` and set `package.json` to `X.Y.(Z+1)` in its first pull request. Then the patch goes to audit and through steps 3 to 7 like any release.
 
+To bring an existing branch into this flow, create `release/<package.json version>` from its head. Open a pull request that adds the current CI, TAG, CREATE_RELEASE and PUBLISH callers. Merge that pull request into the release branch before tagging.
+
 ## Deployment records
 
 Each deploy records `deployments/<chain>/vX.Y.Z.json`: addresses, tx hashes, block numbers, git SHA, deployer, toolchain version, verification metadata. The records reach `main` through a pull request and are not committed to the release branch, so its head, and the tag on it, stays the deployed commit.

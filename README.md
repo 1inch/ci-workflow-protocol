@@ -19,7 +19,7 @@ Shared GitHub Actions workflows and the release flow of the 1inch contract repos
 
 ## Versions
 
-Callers reference a release of this repository, such as `@v2.0.1`, and never a branch. A change merged here reaches a repository only when that repository merges a pull request that moves its callers to the release containing it. The change shows up as a commit in every repository, and moving the callers back reverts it.
+Callers reference a release of this repository, such as `@v2.1.0`, and never a branch. A change merged here reaches a repository only when that repository merges a pull request that moves its callers to the release containing it. The change shows up as a commit in every repository, and moving the callers back reverts it.
 
 The release, publish and tag workflows run with `contents: write` or `id-token: write` in the calling repository. Because callers pin a release, a merge into `main` here does not change what can publish a package. Releases are immutable, so a published tag can be neither moved nor deleted, and a tag ruleset lets only repository admins create, move or delete `v*` tags, which covers a tag before its release is published. A caller references a tag only once its release is published.
 
@@ -30,7 +30,7 @@ To ship a change:
 3. Publish a release from `main`: a patch for a fix, a minor for a new input, a major for a change that callers have to adapt to. Immutable releases are enabled in this repository's settings, so the tag cannot move:
 
    ```bash
-   gh release create v2.0.2 --repo 1inch/ci-workflow-protocol --target main --generate-notes
+   gh release create v2.1.0 --repo 1inch/ci-workflow-protocol --target main --generate-notes
    ```
 
 4. In each repository, open a pull request that moves every caller to the new tag. Everything a repository references here, its callers and the actions alike, names the same release.
@@ -46,10 +46,11 @@ name: CI
 on:
   pull_request:
   push:
-    branches: [main, 'release/*']
+    branches: [main, 'release/**']
+  workflow_dispatch:
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
@@ -57,7 +58,7 @@ permissions:
 
 jobs:
   ci:
-    uses: 1inch/ci-workflow-protocol/.github/workflows/hardhat-ci.yml@v2.0.1
+    uses: 1inch/ci-workflow-protocol/.github/workflows/hardhat-ci.yml@v2.1.0
     with:
       profile: default
       sources: contracts
@@ -89,7 +90,7 @@ With `coverage: true`, the caller also passes the Codecov token:
       CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 ```
 
-The checks are reported as `ci / test`, `ci / snapshot`, `ci / lint` and `ci / coverage`; require exactly the ones a repository runs, plus its own jobs, on `main` and `release/*`. Only the `coverage` job reads a secret. A failed upload does not fail the job, so pull requests from forks, which get no secrets, still pass CI.
+The checks are reported as `ci / test`, `ci / snapshot`, `ci / lint` and `ci / coverage`; require exactly the ones a repository runs, plus its own jobs, on `main` and `release/**`. Only the `coverage` job reads a secret. A failed upload does not fail the job, so pull requests from forks, which get no secrets, still pass CI.
 
 ### Jobs of a repository's own
 
@@ -98,7 +99,7 @@ A check that only one repository needs stays in that repository, as a plain job 
 ```yaml
 jobs:
   ci:
-    uses: 1inch/ci-workflow-protocol/.github/workflows/hardhat-ci.yml@v2.0.1
+    uses: 1inch/ci-workflow-protocol/.github/workflows/hardhat-ci.yml@v2.1.0
     with:
       profile: default
       sources: contracts
@@ -113,15 +114,15 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: 1inch/ci-workflow-protocol/.github/actions/setup@v2.0.1
+      - uses: 1inch/ci-workflow-protocol/.github/actions/setup@v2.1.0
 
-      - uses: 1inch/ci-workflow-protocol/.github/actions/foundry@v2.0.1
+      - uses: 1inch/ci-workflow-protocol/.github/actions/foundry@v2.1.0
 
       - name: Build the Foundry deployers
         run: yarn deployers:foundry && forge build
 ```
 
-The job runs on the caller's triggers, concurrency and read-only permissions, and reports as `forge-build` next to `ci / test` and the other shared checks. Require it on `main` and `release/*` like them. It reuses the shared setup and Foundry actions at the same release as the `ci` job, so it installs the same Foundry version as `foundry-ci.yml`. From another repository an action takes the full path and the tag, because `$/` would point at the calling repository. When a second repository needs the same check, it moves into the shared workflow as an optional input.
+The job runs on the caller's triggers, concurrency and read-only permissions, and reports as `forge-build` next to `ci / test` and the other shared checks. Require it on `main` and `release/**` like them. It reuses the shared setup and Foundry actions at the same release as the `ci` job, so it installs the same Foundry version as `foundry-ci.yml`. From another repository an action takes the full path and the tag, because `$/` would point at the calling repository. When a second repository needs the same check, it moves into the shared workflow as an optional input.
 
 ## Releases
 
@@ -142,7 +143,7 @@ permissions:
 
 jobs:
   tag:
-    uses: 1inch/ci-workflow-protocol/.github/workflows/tag.yml@v2.0.1
+    uses: 1inch/ci-workflow-protocol/.github/workflows/tag.yml@v2.1.0
 ```
 
 | Input | Type | Default | Meaning |
@@ -167,7 +168,7 @@ permissions:
 
 jobs:
   release:
-    uses: 1inch/ci-workflow-protocol/.github/workflows/release.yml@v2.0.1
+    uses: 1inch/ci-workflow-protocol/.github/workflows/release.yml@v2.1.0
     with:
       tag-prefix: v
       changelog: false
@@ -191,21 +192,29 @@ on:
 
 permissions:
   contents: read
+  actions: read
   id-token: write
 
 jobs:
   publish-npmjs:
-    uses: 1inch/ci-workflow-protocol/.github/workflows/publish.yml@v2.0.1
+    uses: 1inch/ci-workflow-protocol/.github/workflows/publish.yml@v2.1.0
 ```
 
-The workflow runs only from the tag made of `tag-prefix` (`v` by default) and the `package.json` version, and fails without publishing when started from a branch or another tag. Packages go to npm only, not to GitHub Packages.
+| Input | Type | Default | Meaning |
+|---|---|---|---|
+| `tag-prefix` | string | `v` | Text in front of the package.json version in the tag: `v` for `v1.2.3`, empty for `1.2.3` |
+| `dry-run` | boolean | `false` | Build and validate the package, then run `npm publish --dry-run` |
+
+The workflow runs only from the tag made of `tag-prefix` (`v` by default) and the `package.json` version. The tag commit must belong to `release/<version>` and have a successful `CI` run from `push` or `workflow_dispatch`. Packages go to npm only, not to GitHub Packages.
 
 A pre-release goes to the `next` dist-tag, and every other version becomes `latest`.
 
 The job runs in the calling repository's `npm` environment. Create it in the repository settings before the first run, because GitHub creates an unprotected environment on first use:
 
 - deployment branches and tags: only the tag pattern `v*`;
-- required reviewers: the repository's maintainers, so every publish waits for an approval.
+- required reviewers: the DevOps team, with self-review disabled.
+
+Package installation and packing run in a separate build job with read-only repository and Actions permissions. The npm job receives only the packed tarball, has no checkout or install step, and alone gets `id-token: write`.
 
 npm publishing uses [trusted publishing](https://docs.npmjs.com/trusted-publishers/), so no npm token is stored anywhere. Before the first run, a package admin adds a trusted publisher in the package settings on npmjs.com:
 
