@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Runs the `run` steps of tag.yml, release.yml and publish.yml against fixed scenarios, with gh and npm stubbed.
-# Needs bash, jq and ruby. WORKFLOWS points at another copy of .github/workflows.
+# Needs bash, jq, ruby and openssl. WORKFLOWS points at another copy of .github/workflows.
 set -u
 
 root=$(cd "$(dirname "$0")/.." && pwd)
@@ -44,6 +44,12 @@ EOF
 cat > "$sim/bin/npm" <<'EOF'
 #!/usr/bin/env bash
 echo "npm $*" >> "$SIM_LOG"
+if [ "$1" = pack ]; then
+  tar -czf "1inch-solidity-utils-${SIM_VERSION}.tgz" package.json
+  if [ "$SIM_EXTRA_PACKAGE" = 1 ]; then
+    cp "1inch-solidity-utils-${SIM_VERSION}.tgz" 1inch-solidity-utils-0.0.1.tgz
+  fi
+fi
 EOF
 cat > "$sim/bin/git" <<'EOF'
 #!/usr/bin/env bash
@@ -62,6 +68,7 @@ failures=0
 tag_exists=0
 on_branch=1
 dry_run=false
+extra_package=0
 
 ci_run() {
   local result=$1 event=${2:-push} sha=${3:-abc1234}
@@ -93,10 +100,12 @@ run_steps() {
   rm -r "$wd/package/package"
   : > "$wd/env"
   : > "$sim/calls"
+  echo "$wd" > "$sim/last_wd"
   (
     export PATH="$sim/bin:$PATH" SIM_LOG="$sim/calls" SIM_RUNS="$sim/runs.json" SIM_TAG_EXISTS=$tag_exists SIM_ON_BRANCH=$on_branch DRY_RUN=$dry_run
+    export SIM_VERSION=$version SIM_EXTRA_PACKAGE=$extra_package
     export GITHUB_REPOSITORY=1inch/solidity-utils GITHUB_SHA=abc1234 GH_TOKEN=stub TAG_PREFIX=v
-    export GITHUB_REF=$ref GITHUB_REF_NAME=${ref#refs/*/} GITHUB_ENV="$wd/env" GITHUB_OUTPUT="$wd/output"
+    export GITHUB_REF=$ref GITHUB_REF_NAME=${ref#refs/*/} GITHUB_ENV="$wd/env" GITHUB_OUTPUT="$wd/output" GITHUB_STEP_SUMMARY="$wd/summary"
     for step in "$@"; do
       script=$(step_script "$workflows/$workflow" "$step") || { echo "missing step: $step"; exit 0; }
       set -a
@@ -163,6 +172,14 @@ else
   failures=$((failures + 1))
 fi
 
+npm_if=$(ruby -ryaml -e 'print YAML.load_file(ARGV[0])["jobs"]["npm"]["if"].to_s' "$workflows/publish.yml")
+if [[ "$npm_if" == *'!inputs.pack-only'* ]]; then
+  echo "ok   PUBLISH pack-only skips the npm job"
+else
+  echo "FAIL PUBLISH pack-only skips the npm job: got \"$npm_if\""
+  failures=$((failures + 1))
+fi
+
 tag_steps=("Check the release branch" "Check CI on the branch head" "Tag the version in package.json")
 tagged='git/refs -f ref=refs/tags/v7\.0\.1 '
 
@@ -207,6 +224,18 @@ check "PUBLISH a pre-release from v7.1.0-rc.1" ok '^npm publish \./package/packa
 dry_run=true
 check "PUBLISH dry-run" ok '^npm publish \./package/package\.tgz --dry-run $' publish.yml 7.0.1 refs/tags/v7.0.1 "Publish"
 dry_run=false
+check "PUBLISH packs one package" ok '^npm pack $' publish.yml 7.0.1 refs/tags/v7.0.1 "Pack"
+pack_wd=$(cat "$sim/last_wd")
+integrity="sha512-$(openssl dgst -sha512 -binary "$pack_wd/1inch-solidity-utils-7.0.1.tgz" | openssl base64 -A)"
+if grep -qF "\`${integrity}\`" "$pack_wd/summary" 2>/dev/null; then
+  echo "ok   PUBLISH writes the package integrity to the run summary"
+else
+  echo "FAIL PUBLISH writes the package integrity to the run summary"
+  failures=$((failures + 1))
+fi
+extra_package=1
+check "PUBLISH refuses a second tarball next to the package" "Pack" '^npm pack $' publish.yml 7.0.1 refs/tags/v7.0.1 "Pack"
+extra_package=0
 check "PUBLISH from main" "Check the release tag" - publish.yml 7.0.1 refs/heads/main "Check the release tag" "Publish"
 
 if [ "$failures" -gt 0 ]; then
