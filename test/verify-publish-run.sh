@@ -48,14 +48,19 @@ last_out=
 extra_member=0
 
 caller() {
-  printf 'jobs:\n  publish-npmjs:\n    uses: %s\n' "$1" > "$sim/caller.yml"
+  local uses=$1
+  printf 'jobs:\n  publish-npmjs:\n    uses: %s\n' "$uses" > "$sim/caller.yml"
+  return 0
 }
 
 # run <event> <head_sha> <path> <conclusion> <referenced workflow path> <referenced workflow sha>
 run() {
-  jq -n --arg event "$1" --arg head_sha "$2" --arg path "$3" --arg conclusion "$4" --arg ref_path "$5" --arg ref_sha "$6" \
+  local event=$1 head_sha=$2 path=$3 conclusion=$4 ref_path=$5 ref_sha=$6
+  jq -n --arg event "$event" --arg head_sha "$head_sha" --arg path "$path" --arg conclusion "$conclusion" \
+    --arg ref_path "$ref_path" --arg ref_sha "$ref_sha" \
     '{event: $event, head_sha: $head_sha, path: $path, status: "completed", conclusion: $conclusion,
       referenced_workflows: [{path: $ref_path, sha: $ref_sha, ref: "refs/tags/v2.2.0"}]}' > "$sim/run.json"
+  return 0
 }
 
 # check <title> <"ok" or text the error must contain>
@@ -63,13 +68,13 @@ check() {
   local title=$1 expected=$2 status=0
   last_out=$(PATH="$sim/bin:$PATH" TMPDIR="$sim/tmp" SIM="$sim" SIM_TAG_SHA=$tag_sha SIM_RELEASE_SHA=$release_sha SIM_EXTRA_MEMBER=$extra_member \
     bash "$script" 1inch/aqua 123 v1.0.1 2>&1) || status=$?
-  if { [ "$expected" = ok ] && [ "$status" -eq 0 ]; } ||
-    { [ "$expected" != ok ] && [ "$status" -ne 0 ] && [[ "$last_out" == *"$expected"* ]]; }; then
+  if [[ ( "$expected" == ok && "$status" -eq 0 ) || ( "$expected" != ok && "$status" -ne 0 && "$last_out" == *"$expected"* ) ]]; then
     echo "ok   $title"
   else
     echo "FAIL $title: expected \"$expected\", got exit $status: $last_out"
     failures=$((failures + 1))
   fi
+  return 0
 }
 
 caller "$shared"
@@ -77,7 +82,7 @@ run workflow_dispatch "$tag_sha" .github/workflows/publish.yml success "$shared"
 check "a pack-only run on the release tag" ok
 package=$(sed -n 's/^Package: //p' <<<"$last_out")
 integrity="npm integrity: sha512-$(openssl dgst -sha512 -binary "$package" 2>/dev/null | openssl base64 -A)"
-if [ -n "$package" ] && [[ "$last_out" == *"$integrity"* ]]; then
+if [[ -n "$package" && "$last_out" == *"$integrity"* ]]; then
   echo "ok   the printed integrity is the downloaded package's"
 else
   echo "FAIL the printed integrity is the downloaded package's: $last_out"
@@ -104,7 +109,7 @@ caller "attacker/fork/.github/workflows/publish.yml@v2.2.0"
 run workflow_dispatch "$tag_sha" .github/workflows/publish.yml success "$shared" "$release_sha"
 check "a tag whose publish.yml does not call the shared workflow" "does not call the shared publish workflow"
 
-if [ "$failures" -gt 0 ]; then
+if [[ "$failures" -gt 0 ]]; then
   echo "$failures scenario(s) failed"
   exit 1
 fi

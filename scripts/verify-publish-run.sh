@@ -5,7 +5,7 @@
 # Needs gh, signed in with read access to the repository, jq and openssl.
 set -euo pipefail
 
-if [ $# -ne 3 ]; then
+if [[ $# -ne 3 ]]; then
   echo "usage: $0 <owner/repository> <run-id> <tag>" >&2
   exit 2
 fi
@@ -18,11 +18,11 @@ fail() {
 
 # Prints the commit a tag points to, through the tag object of an annotated tag.
 tag_commit() {
-  local ref sha
-  ref=$(gh api "repos/$1/git/ref/tags/$2")
+  local repository=$1 name=$2 ref sha
+  ref=$(gh api "repos/$repository/git/ref/tags/$name")
   sha=$(jq -r .object.sha <<<"$ref")
-  if [ "$(jq -r .object.type <<<"$ref")" = tag ]; then
-    sha=$(gh api "repos/$1/git/tags/$sha" | jq -r .object.sha)
+  if [[ "$(jq -r .object.type <<<"$ref")" == tag ]]; then
+    sha=$(gh api "repos/$repository/git/tags/$sha" | jq -r .object.sha)
   fi
   echo "$sha"
 }
@@ -30,13 +30,14 @@ tag_commit() {
 tag_sha=$(tag_commit "$repo" "$tag")
 run=$(gh api "repos/$repo/actions/runs/$run_id")
 field() {
-  jq -r ".$1" <<<"$run"
+  local name=$1
+  jq -r ".$name" <<<"$run"
 }
 
-[ "$(field event)" = workflow_dispatch ] || fail "run $run_id was started by $(field event), not workflow_dispatch"
-[ "$(field head_sha)" = "$tag_sha" ] || fail "run $run_id built commit $(field head_sha), not $tag ($tag_sha)"
-[ "$(field path)" = .github/workflows/publish.yml ] || fail "run $run_id ran $(field path), not .github/workflows/publish.yml"
-[ "$(field conclusion)" = success ] || fail "run $run_id concluded $(field conclusion), not success"
+[[ "$(field event)" == workflow_dispatch ]] || fail "run $run_id was started by $(field event), not workflow_dispatch"
+[[ "$(field head_sha)" == "$tag_sha" ]] || fail "run $run_id built commit $(field head_sha), not $tag ($tag_sha)"
+[[ "$(field path)" == .github/workflows/publish.yml ]] || fail "run $run_id ran $(field path), not .github/workflows/publish.yml"
+[[ "$(field conclusion)" == success ]] || fail "run $run_id concluded $(field conclusion), not success"
 
 # The shared workflow release that publish.yml names at the tag's commit, pinned to that release's commit.
 caller=$(gh api -H 'Accept: application/vnd.github.raw+json' "repos/$repo/contents/.github/workflows/publish.yml?ref=$tag_sha")
@@ -54,7 +55,7 @@ jq -e --arg path "$uses" --arg sha "$release_sha" 'any(.referenced_workflows[]?;
 dir=$(mktemp -d)
 gh run download "$run_id" --repo "$repo" --name npm-package --dir "$dir"
 entries=$(find "$dir" -mindepth 1 -maxdepth 1)
-[ "$(printf '%s\n' "$entries" | grep -c .)" -eq 1 ] && [ -f "$entries" ] && [[ "$entries" == *.tgz ]] ||
+[[ "$(printf '%s\n' "$entries" | grep -c .)" -eq 1 && -f "$entries" && "$entries" == *.tgz ]] ||
   fail "the npm-package artifact of run $run_id should hold one tarball, it holds: ${entries:-nothing}"
 package=$entries
 
