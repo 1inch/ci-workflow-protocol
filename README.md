@@ -223,7 +223,7 @@ The job runs in the calling repository's `npm` environment. Create it in the rep
 - deployment branches and tags: only the tag pattern `v*`;
 - required reviewers: the DevOps team, with self-review disabled.
 
-Package installation and packing run in a separate build job with read-only repository and Actions permissions. The npm job receives only the packed tarball, has no checkout or install step, and alone gets `id-token: write`. The build job fails when it finds more than one tarball, so the npm job publishes only the package it packed, and it writes the package's file name, SHA-256 and npm integrity to the run summary.
+Package installation and packing run in a separate build job with read-only repository and Actions permissions. The npm job receives only the packed tarball, has no checkout or install step, and alone gets `id-token: write`. The build job packs into an empty directory of its own and uploads only the file `npm pack` wrote there, so no tarball or symlink committed to the repository reaches the artifact. It writes that file's name, SHA-256 and npm integrity to the run summary, and the npm job refuses an artifact that holds anything but one tarball.
 
 npm publishing uses [trusted publishing](https://docs.npmjs.com/trusted-publishers/), so no npm token is stored anywhere. Before the first run, a package admin adds a trusted publisher in the package settings on npmjs.com:
 

@@ -45,9 +45,13 @@ cat > "$sim/bin/npm" <<'EOF'
 #!/usr/bin/env bash
 echo "npm $*" >> "$SIM_LOG"
 if [ "$1" = pack ]; then
-  tar -czf "1inch-solidity-utils-${SIM_VERSION}.tgz" package.json
+  destination=.
+  if [ "${2:-}" = --pack-destination ]; then
+    destination=$3
+  fi
+  tar -czf "$destination/1inch-solidity-utils-${SIM_VERSION}.tgz" package.json
   if [ "$SIM_EXTRA_PACKAGE" = 1 ]; then
-    cp "1inch-solidity-utils-${SIM_VERSION}.tgz" 1inch-solidity-utils-0.0.1.tgz
+    cp "$destination/1inch-solidity-utils-${SIM_VERSION}.tgz" "$destination/1inch-solidity-utils-0.0.1.tgz"
   fi
 fi
 EOF
@@ -69,6 +73,8 @@ tag_exists=0
 on_branch=1
 dry_run=false
 extra_package=0
+root_symlink=0
+extra_artifact=0
 
 ci_run() {
   local result=$1 event=${2:-push} sha=${3:-abc1234}
@@ -98,6 +104,13 @@ run_steps() {
   cp "$wd/package.json" "$wd/package/package/package.json"
   tar -czf "$wd/package/package.tgz" -C "$wd/package" package
   rm -r "$wd/package/package"
+  mkdir -p "$wd/runner-temp"
+  if [ "$root_symlink" = 1 ]; then
+    ln -s package.json "$wd/stray.tgz"
+  fi
+  if [ "$extra_artifact" = 1 ]; then
+    cp "$wd/package/package.tgz" "$wd/package/second.tgz"
+  fi
   : > "$wd/env"
   : > "$sim/calls"
   echo "$wd" > "$sim/last_wd"
@@ -105,7 +118,7 @@ run_steps() {
     export PATH="$sim/bin:$PATH" SIM_LOG="$sim/calls" SIM_RUNS="$sim/runs.json" SIM_TAG_EXISTS=$tag_exists SIM_ON_BRANCH=$on_branch DRY_RUN=$dry_run
     export SIM_VERSION=$version SIM_EXTRA_PACKAGE=$extra_package
     export GITHUB_REPOSITORY=1inch/solidity-utils GITHUB_SHA=abc1234 GH_TOKEN=stub TAG_PREFIX=v
-    export GITHUB_REF=$ref GITHUB_REF_NAME=${ref#refs/*/} GITHUB_ENV="$wd/env" GITHUB_OUTPUT="$wd/output" GITHUB_STEP_SUMMARY="$wd/summary"
+    export GITHUB_REF=$ref GITHUB_REF_NAME=${ref#refs/*/} GITHUB_ENV="$wd/env" GITHUB_OUTPUT="$wd/output" GITHUB_STEP_SUMMARY="$wd/summary" RUNNER_TEMP="$wd/runner-temp"
     for step in "$@"; do
       script=$(step_script "$workflows/$workflow" "$step") || { echo "missing step: $step"; exit 0; }
       set -a
@@ -172,6 +185,17 @@ else
   failures=$((failures + 1))
 fi
 
+upload_path=$(ruby -ryaml -e '
+  step = YAML.load_file(ARGV[0])["jobs"]["build"]["steps"].find { |s| s["name"] == "Upload package" }
+  print step["with"]["path"].to_s
+' "$workflows/publish.yml")
+if [ "$upload_path" = '${{ steps.pack.outputs.package }}' ]; then
+  echo "ok   PUBLISH uploads only the file Pack wrote"
+else
+  echo "FAIL PUBLISH uploads only the file Pack wrote: got \"$upload_path\""
+  failures=$((failures + 1))
+fi
+
 npm_if=$(ruby -ryaml -e 'print YAML.load_file(ARGV[0])["jobs"]["npm"]["if"].to_s' "$workflows/publish.yml")
 if [[ "$npm_if" == *'!inputs.pack-only'* ]]; then
   echo "ok   PUBLISH pack-only skips the npm job"
@@ -224,18 +248,34 @@ check "PUBLISH a pre-release from v7.1.0-rc.1" ok '^npm publish \./package/packa
 dry_run=true
 check "PUBLISH dry-run" ok '^npm publish \./package/package\.tgz --dry-run $' publish.yml 7.0.1 refs/tags/v7.0.1 "Publish"
 dry_run=false
-check "PUBLISH packs one package" ok '^npm pack $' publish.yml 7.0.1 refs/tags/v7.0.1 "Pack"
-pack_wd=$(cat "$sim/last_wd")
-integrity="sha512-$(openssl dgst -sha512 -binary "$pack_wd/1inch-solidity-utils-7.0.1.tgz" | openssl base64 -A)"
-if grep -qF "\`${integrity}\`" "$pack_wd/summary" 2>/dev/null; then
-  echo "ok   PUBLISH writes the package integrity to the run summary"
-else
-  echo "FAIL PUBLISH writes the package integrity to the run summary"
-  failures=$((failures + 1))
-fi
+packed='^npm pack --pack-destination [^ ]*/runner-temp/npm-package\.[^ ]* $'
+
+# check_packed_output <title>: the last run's Pack output names the packed file, and the summary holds its integrity.
+check_packed_output() {
+  local pack_wd package integrity
+  pack_wd=$(cat "$sim/last_wd")
+  package=$(sed -n 's/^package=//p' "$pack_wd/output" 2>/dev/null)
+  integrity="sha512-$(openssl dgst -sha512 -binary "$package" 2>/dev/null | openssl base64 -A)"
+  if [[ "$package" == "$pack_wd"/runner-temp/npm-package.*/1inch-solidity-utils-7.0.1.tgz ]] && grep -qF "\`${integrity}\`" "$pack_wd/summary" 2>/dev/null; then
+    echo "ok   $1"
+  else
+    echo "FAIL $1: package=\"$package\""
+    failures=$((failures + 1))
+  fi
+}
+
+check "PUBLISH packs one package" ok "$packed" publish.yml 7.0.1 refs/tags/v7.0.1 "Pack"
+check_packed_output "PUBLISH outputs the packed file and writes its integrity to the run summary"
+root_symlink=1
+check "PUBLISH packs next to a *.tgz symlink in the checkout" ok "$packed" publish.yml 7.0.1 refs/tags/v7.0.1 "Pack"
+check_packed_output "PUBLISH outputs the packed file, not the symlink"
+root_symlink=0
 extra_package=1
-check "PUBLISH refuses a second tarball next to the package" "Pack" '^npm pack $' publish.yml 7.0.1 refs/tags/v7.0.1 "Pack"
+check "PUBLISH refuses a second tarball from npm pack" "Pack" "$packed" publish.yml 7.0.1 refs/tags/v7.0.1 "Pack"
 extra_package=0
+extra_artifact=1
+check "PUBLISH refuses an artifact with a second file" "Publish" - publish.yml 7.0.1 refs/tags/v7.0.1 "Publish"
+extra_artifact=0
 check "PUBLISH from main" "Check the release tag" - publish.yml 7.0.1 refs/heads/main "Check the release tag" "Publish"
 
 if [ "$failures" -gt 0 ]; then

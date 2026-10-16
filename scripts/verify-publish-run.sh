@@ -53,11 +53,13 @@ jq -e --arg path "$uses" --arg sha "$release_sha" 'any(.referenced_workflows[]?;
 
 dir=$(mktemp -d)
 gh run download "$run_id" --repo "$repo" --name npm-package --dir "$dir"
-packages=$(find "$dir" -maxdepth 1 -type f -name '*.tgz')
-[ "$(printf '%s\n' "$packages" | grep -c .)" -eq 1 ] || fail "the npm-package artifact of run $run_id holds ${packages:-no tarball}"
+entries=$(find "$dir" -mindepth 1 -maxdepth 1)
+[ "$(printf '%s\n' "$entries" | grep -c .)" -eq 1 ] && [ -f "$entries" ] && [[ "$entries" == *.tgz ]] ||
+  fail "the npm-package artifact of run $run_id should hold one tarball, it holds: ${entries:-nothing}"
+package=$entries
 
 echo "Run $run_id built $tag ($tag_sha) with $uses ($release_sha)."
-echo "Package: $packages"
-echo "SHA-256: $(openssl dgst -sha256 "$packages" | awk '{print $NF}')"
-echo "npm integrity: sha512-$(openssl dgst -sha512 -binary "$packages" | openssl base64 -A)"
-echo "Publish it with: npm publish $packages"
+echo "Package: $package"
+echo "SHA-256: $(openssl dgst -sha256 "$package" | awk '{print $NF}')"
+echo "npm integrity: sha512-$(openssl dgst -sha512 -binary "$package" | openssl base64 -A)"
+echo "Publish it with: npm publish $package"

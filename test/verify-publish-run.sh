@@ -22,6 +22,9 @@ if [ "$1 $2" = "run download" ]; then
     shift
   done
   tar -czf "$dir/1inch-aqua-1.0.1.tgz" -C "$SIM" package
+  if [ "$SIM_EXTRA_MEMBER" = 1 ]; then
+    echo stray > "$dir/stray.txt"
+  fi
   exit 0
 fi
 [ "$1" = api ] || exit 1
@@ -42,6 +45,7 @@ chmod +x "$sim/bin/gh"
 
 failures=0
 last_out=
+extra_member=0
 
 caller() {
   printf 'jobs:\n  publish-npmjs:\n    uses: %s\n' "$1" > "$sim/caller.yml"
@@ -57,7 +61,7 @@ run() {
 # check <title> <"ok" or text the error must contain>
 check() {
   local title=$1 expected=$2 status=0
-  last_out=$(PATH="$sim/bin:$PATH" TMPDIR="$sim/tmp" SIM="$sim" SIM_TAG_SHA=$tag_sha SIM_RELEASE_SHA=$release_sha \
+  last_out=$(PATH="$sim/bin:$PATH" TMPDIR="$sim/tmp" SIM="$sim" SIM_TAG_SHA=$tag_sha SIM_RELEASE_SHA=$release_sha SIM_EXTRA_MEMBER=$extra_member \
     bash "$script" 1inch/aqua 123 v1.0.1 2>&1) || status=$?
   if { [ "$expected" = ok ] && [ "$status" -eq 0 ]; } ||
     { [ "$expected" != ok ] && [ "$status" -ne 0 ] && [[ "$last_out" == *"$expected"* ]]; }; then
@@ -79,6 +83,10 @@ else
   echo "FAIL the printed integrity is the downloaded package's: $last_out"
   failures=$((failures + 1))
 fi
+
+extra_member=1
+check "an artifact with a second file" "should hold one tarball"
+extra_member=0
 
 run push "$tag_sha" .github/workflows/publish.yml success "$shared" "$release_sha"
 check "a run not started by workflow_dispatch" "not workflow_dispatch"

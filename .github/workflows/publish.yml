@@ -70,29 +70,34 @@ jobs:
       - name: Install node modules
         run: yarn install --frozen-lockfile
 
+      # npm pack writes into an empty directory and only the file it wrote is uploaded: a '*.tgz' glob over the checkout would also take committed tarballs and symlinks.
       - name: Pack
+        id: pack
         run: |
-          npm pack
-          packages=$(find . -maxdepth 1 -type f -name '*.tgz')
-          if [ "$(printf '%s\n' "$packages" | grep -c .)" -ne 1 ]; then
-            echo "::error::Expected one package tarball, found: ${packages:-none}"
+          destination=$(mktemp -d "${RUNNER_TEMP}/npm-package.XXXXXX")
+          npm pack --pack-destination "$destination"
+          entries=$(find "$destination" -mindepth 1 -maxdepth 1)
+          if [ "$(printf '%s\n' "$entries" | grep -c .)" -ne 1 ] || [ ! -f "$entries" ] || [ -L "$entries" ] || [[ "$entries" != *.tgz ]]; then
+            echo "::error::npm pack should write one tarball, it wrote: ${entries:-nothing}"
             exit 1
           fi
-          package=${packages#./}
+          package=$entries
+          name=${package##*/}
           sha256=$(openssl dgst -sha256 "$package" | awk '{print $NF}')
           integrity="sha512-$(openssl dgst -sha512 -binary "$package" | openssl base64 -A)"
-          echo "${package}: SHA-256 ${sha256}, npm integrity ${integrity}"
+          echo "${name}: SHA-256 ${sha256}, npm integrity ${integrity}"
+          echo "package=${package}" >> "$GITHUB_OUTPUT"
           {
             echo "| Package | SHA-256 | npm integrity |"
             echo "|---|---|---|"
-            echo "| \`${package}\` | \`${sha256}\` | \`${integrity}\` |"
+            echo "| \`${name}\` | \`${sha256}\` | \`${integrity}\` |"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload package
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: npm-package
-          path: '*.tgz'
+          path: ${{ steps.pack.outputs.package }}
           if-no-files-found: error
 
   npm:
@@ -122,7 +127,12 @@ jobs:
         env:
           DRY_RUN: ${{ inputs.dry-run }}
         run: |
-          package=$(find ./package -type f -name '*.tgz' -print -quit)
+          entries=$(find ./package -mindepth 1 -maxdepth 1)
+          if [ "$(printf '%s\n' "$entries" | grep -c .)" -ne 1 ] || [ ! -f "$entries" ] || [[ "$entries" != *.tgz ]]; then
+            echo "::error::The npm-package artifact should hold one tarball, it holds: ${entries:-nothing}"
+            exit 1
+          fi
+          package=$entries
           version=$(tar -xOf "$package" package/package.json | jq -r .version)
           args=("$package")
           if [[ "$version" == *-* ]]; then
