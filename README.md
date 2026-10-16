@@ -8,6 +8,7 @@ Shared GitHub Actions workflows and the release flow of the 1inch contract repos
   - [setup](.github/actions/setup/action.yml) starts every job. It checks out the commit under test without persisted credentials, sets up Node.js 24 with the Yarn cache and runs `yarn install --frozen-lockfile`.
   - [hardhat](.github/actions/hardhat/action.yml) restores and saves Hardhat's build cache in the `test` job of `hardhat-ci.yml`.
   - [foundry](.github/actions/foundry/action.yml) installs Foundry in every job of `foundry-ci.yml` and caches its build output in the `test` job.
+- [scripts/verify-publish-run.sh](scripts/verify-publish-run.sh): checks a `PUBLISH` run through the GitHub API before a package admin publishes its package by hand.
 
 | Shared workflow | Caller in the repository | What it does |
 |---|---|---|
@@ -26,7 +27,7 @@ The release, publish and tag workflows run with `contents: write` or `id-token: 
 To ship a change:
 
 1. Try it from a branch first, by pointing one repository's pull request at that branch. Keep inputs backward-compatible: a new input is optional and defaults to the old behaviour.
-2. Merge it into `main` through a reviewed pull request. The `Self-test` workflow runs `test/release-workflows.sh` on it, which runs the steps of the tag, release and publish workflows against fixed scenarios with `gh` and `npm` stubbed. Run it locally with `bash test/release-workflows.sh`; it needs `jq`, `ruby` and `openssl`.
+2. Merge it into `main` through a reviewed pull request. The `Self-test` workflow runs `test/release-workflows.sh` on it, which runs the steps of the tag, release and publish workflows against fixed scenarios with `gh` and `npm` stubbed, and `test/verify-publish-run.sh`, which runs `scripts/verify-publish-run.sh` against fixed GitHub API answers. Run them locally with `bash test/<name>.sh`; they need `jq`, `ruby` and `openssl`.
 3. Publish a release from `main`: a patch for a fix, a minor for a new input, a major for a change that callers have to adapt to. Immutable releases are enabled in this repository's settings, so the tag cannot move:
 
    ```bash
@@ -239,8 +240,10 @@ For a reusable workflow npm checks the caller's filename, so the caller must be 
 npm adds a trusted publisher only to a package that already exists, so a new package's first version is published by hand, from the package that `PUBLISH` builds:
 
 1. Run `TAG`, then `CREATE_RELEASE`, as for any release. A scoped package needs `"publishConfig": { "access": "public" }` in `package.json`.
-2. Run `PUBLISH` from the tag with `pack-only` checked. The build job runs the same checks as for any publish, packs the package, uploads it as the `npm-package` artifact and writes its SHA-256 and npm integrity to the run summary. The npm job does not run.
-3. A package admin downloads the artifact with `gh run download <run-id> -n npm-package --repo 1inch/<repository>`, compares `shasum -a 256 <file>.tgz` with the summary, and publishes the file with `npm publish <file>.tgz`, answering the 2FA prompt.
-4. `npm view <package>@<version> dist.integrity` prints the integrity from the summary.
+2. Run `PUBLISH` from the tag with `pack-only` checked. The build job runs the same checks as for any publish, packs the package and uploads it as the `npm-package` artifact. The npm job does not run, so the run never enters the `npm` environment.
+3. A package admin checks the run and downloads its package with `scripts/verify-publish-run.sh 1inch/<repository> <run-id> <tag>`. Through the GitHub API the script checks that the run was started by `workflow_dispatch` on the tag's commit, ran `.github/workflows/publish.yml` and succeeded, and that it called the shared publish workflow at the release that `publish.yml` names at that commit, pinned to that release's commit. Only then does it download `npm-package` and print the package's SHA-256 and npm integrity.
+4. The admin publishes the file with `npm publish <file>.tgz`, answering the 2FA prompt. `npm view <package>@<version> dist.integrity` then prints the integrity the script printed.
+
+The run summary alone proves nothing: without the `npm` environment a run can start from any ref, and a rewritten caller can upload any tarball with a matching summary. The script anchors to the tag instead. A run that succeeded on the tag's commit through the pinned shared workflow has passed the shared build job's checks, so that commit is on `release/<version>` and passed CI.
 
 The first version carries no provenance, because npm attaches provenance only to a publish from CI. A trusted publisher that has not published within two days expires, so the package admin adds it right before the next release, which publishes from CI. Trusted publishers created since 2026-09-03 allow only `npm stage publish` unless `npm publish` is also selected, and this workflow runs `npm publish`.

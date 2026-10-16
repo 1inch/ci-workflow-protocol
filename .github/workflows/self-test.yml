@@ -19,3 +19,6 @@ jobs:
 
       - name: Run the release workflow scenarios
         run: bash test/release-workflows.sh
+
+      - name: Run the publish run verification scenarios
+        run: bash test/verify-publish-run.sh
