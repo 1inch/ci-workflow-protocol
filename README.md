@@ -8,6 +8,7 @@ Shared GitHub Actions workflows and the release flow of the 1inch contract repos
   - [setup](.github/actions/setup/action.yml) starts every job. It checks out the commit under test without persisted credentials, sets up Node.js 24 with the Yarn cache and runs `yarn install --frozen-lockfile`.
   - [hardhat](.github/actions/hardhat/action.yml) restores and saves Hardhat's build cache in the `test` job of `hardhat-ci.yml`.
   - [foundry](.github/actions/foundry/action.yml) installs Foundry in every job of `foundry-ci.yml` and caches its build output in the `test` job.
+- [scripts/verify-publish-run.sh](scripts/verify-publish-run.sh): checks a `PUBLISH` run through the GitHub API before a package admin publishes its package by hand.
 
 | Shared workflow | Caller in the repository | What it does |
 |---|---|---|
@@ -19,18 +20,18 @@ Shared GitHub Actions workflows and the release flow of the 1inch contract repos
 
 ## Versions
 
-Callers reference a release of this repository, such as `@v2.1.0`, and never a branch. A change merged here reaches a repository only when that repository merges a pull request that moves its callers to the release containing it. The change shows up as a commit in every repository, and moving the callers back reverts it.
+Callers reference a release of this repository, such as `@v2.2.0`, and never a branch. A change merged here reaches a repository only when that repository merges a pull request that moves its callers to the release containing it. The change shows up as a commit in every repository, and moving the callers back reverts it.
 
 The release, publish and tag workflows run with `contents: write` or `id-token: write` in the calling repository. Because callers pin a release, a merge into `main` here does not change what can publish a package. Releases are immutable, so a published tag can be neither moved nor deleted, and a tag ruleset lets only repository admins create, move or delete `v*` tags, which covers a tag before its release is published. A caller references a tag only once its release is published.
 
 To ship a change:
 
 1. Try it from a branch first, by pointing one repository's pull request at that branch. Keep inputs backward-compatible: a new input is optional and defaults to the old behaviour.
-2. Merge it into `main` through a reviewed pull request. The `Self-test` workflow runs `test/release-workflows.sh` on it, which runs the steps of the tag, release and publish workflows against fixed scenarios with `gh` and `npm` stubbed. Run it locally with `bash test/release-workflows.sh`; it needs `jq` and `ruby`.
+2. Merge it into `main` through a reviewed pull request. The `Self-test` workflow runs `test/release-workflows.sh` on it, which runs the steps of the tag, release and publish workflows, and the publish workflow's jobs end to end with the artifact passed between them, against fixed scenarios with `gh`, `git`, `npm` and `yarn` stubbed, and `test/verify-publish-run.sh`, which runs `scripts/verify-publish-run.sh` against fixed GitHub API answers. Run them locally with `bash test/<name>.sh`; they need `jq`, `ruby` and `openssl`.
 3. Publish a release from `main`: a patch for a fix, a minor for a new input, a major for a change that callers have to adapt to. Immutable releases are enabled in this repository's settings, so the tag cannot move:
 
    ```bash
-   gh release create v2.1.0 --repo 1inch/ci-workflow-protocol --target main --generate-notes
+   gh release create v2.2.0 --repo 1inch/ci-workflow-protocol --target main --generate-notes
    ```
 
 4. In each repository, open a pull request that moves every caller to the new tag. Everything a repository references here, its callers and the actions alike, names the same release.
@@ -58,7 +59,7 @@ permissions:
 
 jobs:
   ci:
-    uses: 1inch/ci-workflow-protocol/.github/workflows/hardhat-ci.yml@v2.1.0
+    uses: 1inch/ci-workflow-protocol/.github/workflows/hardhat-ci.yml@v2.2.0
     with:
       profile: default
       sources: contracts
@@ -99,7 +100,7 @@ A check that only one repository needs stays in that repository, as a plain job 
 ```yaml
 jobs:
   ci:
-    uses: 1inch/ci-workflow-protocol/.github/workflows/hardhat-ci.yml@v2.1.0
+    uses: 1inch/ci-workflow-protocol/.github/workflows/hardhat-ci.yml@v2.2.0
     with:
       profile: default
       sources: contracts
@@ -114,9 +115,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: 1inch/ci-workflow-protocol/.github/actions/setup@v2.1.0
+      - uses: 1inch/ci-workflow-protocol/.github/actions/setup@v2.2.0
 
-      - uses: 1inch/ci-workflow-protocol/.github/actions/foundry@v2.1.0
+      - uses: 1inch/ci-workflow-protocol/.github/actions/foundry@v2.2.0
 
       - name: Build the Foundry deployers
         run: yarn deployers:foundry && forge build
@@ -143,7 +144,7 @@ permissions:
 
 jobs:
   tag:
-    uses: 1inch/ci-workflow-protocol/.github/workflows/tag.yml@v2.1.0
+    uses: 1inch/ci-workflow-protocol/.github/workflows/tag.yml@v2.2.0
 ```
 
 | Input | Type | Default | Meaning |
@@ -168,7 +169,7 @@ permissions:
 
 jobs:
   release:
-    uses: 1inch/ci-workflow-protocol/.github/workflows/release.yml@v2.1.0
+    uses: 1inch/ci-workflow-protocol/.github/workflows/release.yml@v2.2.0
     with:
       tag-prefix: v
       changelog: false
@@ -189,6 +190,11 @@ The workflow runs only from the tag made of `tag-prefix` and the `package.json` 
 name: PUBLISH
 on:
   workflow_dispatch:
+    inputs:
+      pack-only:
+        description: Build the package without publishing it
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -197,13 +203,16 @@ permissions:
 
 jobs:
   publish-npmjs:
-    uses: 1inch/ci-workflow-protocol/.github/workflows/publish.yml@v2.1.0
+    uses: 1inch/ci-workflow-protocol/.github/workflows/publish.yml@v2.2.0
+    with:
+      pack-only: ${{ inputs.pack-only }}
 ```
 
 | Input | Type | Default | Meaning |
 |---|---|---|---|
 | `tag-prefix` | string | `v` | Text in front of the package.json version in the tag: `v` for `v1.2.3`, empty for `1.2.3` |
 | `dry-run` | boolean | `false` | Build and validate the package, then run `npm publish --dry-run` |
+| `pack-only` | boolean | `false` | Run only the build job: check the tag, pack the package and upload it as the `npm-package` artifact, without publishing it. For the first version of a package that is not on npm yet |
 
 The workflow runs only from the tag made of `tag-prefix` (`v` by default) and the `package.json` version. The tag commit must belong to `release/<version>` and have a successful `CI` run from `push` or `workflow_dispatch`. Packages go to npm only, not to GitHub Packages.
 
@@ -214,7 +223,7 @@ The job runs in the calling repository's `npm` environment. Create it in the rep
 - deployment branches and tags: only the tag pattern `v*`;
 - required reviewers: the DevOps team, with self-review disabled.
 
-Package installation and packing run in a separate build job with read-only repository and Actions permissions. The npm job receives only the packed tarball, has no checkout or install step, and alone gets `id-token: write`.
+Package installation and packing run in a separate build job with read-only repository and Actions permissions. The npm job receives only the packed tarball, has no checkout or install step, and alone gets `id-token: write`. The build job packs into an empty directory of its own and uploads only the file `npm pack` wrote there, so no tarball or symlink committed to the repository reaches the artifact. It writes that file's name, SHA-256 and npm integrity to the run summary, and the npm job refuses an artifact that holds anything but one tarball.
 
 npm publishing uses [trusted publishing](https://docs.npmjs.com/trusted-publishers/), so no npm token is stored anywhere. Before the first run, a package admin adds a trusted publisher in the package settings on npmjs.com:
 
@@ -222,8 +231,19 @@ npm publishing uses [trusted publishing](https://docs.npmjs.com/trusted-publishe
 - workflow filename `publish.yml`, with `npm publish` allowed;
 - environment `npm`.
 
-`workflow_dispatch` runs the caller file of the ref it is started from, so someone with write access could push a branch with a rewritten `publish.yml` that skips the tag check. The environment is what such a file cannot get around: npm refuses a publish from outside `npm`, and GitHub does not start a job in `npm` from a branch.
+Once a publish from CI has passed, the package admin sets **Publishing access** in the package settings to "Require two-factor authentication and disallow tokens". Trusted publishing keeps working, and no npm token can publish the package any more.
+
+`workflow_dispatch` runs the caller file of the ref it is started from, so someone with write access could push a branch with a rewritten `publish.yml` that skips the tag check. The environment is what such a file cannot get around, as long as the trusted publisher names it: npm then refuses a publish from outside `npm`, and GitHub does not start a job in `npm` from a branch.
 
 For a reusable workflow npm checks the caller's filename, so the caller must be named `publish.yml`. The shared workflow has the same name, so the check passes whichever file npm reads. The package's `repository.url` in `package.json` must name the same repository.
 
-npm adds a trusted publisher only to a package that already exists, so a package admin publishes a new package's first version by hand, from its tag, with `"publishConfig": { "access": "public" }` in `package.json` for a scoped package. A trusted publisher that has not published within two days expires, so add it right before the first publish from CI. Trusted publishers created since 2026-09-03 allow only `npm stage publish` unless `npm publish` is also selected, and this workflow runs `npm publish`.
+npm adds a trusted publisher only to a package that already exists, so a new package's first version is published by hand, from the package that `PUBLISH` builds:
+
+1. Run `TAG`, then `CREATE_RELEASE`, as for any release. A scoped package needs `"publishConfig": { "access": "public" }` in `package.json`.
+2. Run `PUBLISH` from the tag with `pack-only` checked. The build job runs the same checks as for any publish, packs the package and uploads it as the `npm-package` artifact. The npm job does not run, so the run never enters the `npm` environment.
+3. A package admin checks the run and downloads its package with `scripts/verify-publish-run.sh 1inch/<repository> <run-id> <tag>`. Through the GitHub API the script checks that the run was started by `workflow_dispatch` on the tag's commit, ran `.github/workflows/publish.yml` and succeeded, and that it called the shared publish workflow at the release that `publish.yml` names at that commit, pinned to that release's commit. Only then does it download `npm-package` and print the package's SHA-256 and npm integrity.
+4. The admin publishes the file with `npm publish <file>.tgz`, answering the 2FA prompt. `npm view <package>@<version> dist.integrity` then prints the integrity the script printed.
+
+The run summary alone proves nothing: without the `npm` environment a run can start from any ref, and a rewritten caller can upload any tarball with a matching summary. The script anchors to the tag instead. A run that succeeded on the tag's commit through the pinned shared workflow has passed the shared build job's checks, so that commit is on `release/<version>` and passed CI.
+
+The first version carries no provenance, because npm attaches provenance only to a publish from CI. A trusted publisher that has not published within two days expires, so the package admin adds it right before the next release, which publishes from CI. Trusted publishers created since 2026-09-03 allow only `npm stage publish` unless `npm publish` is also selected, and this workflow runs `npm publish`.
