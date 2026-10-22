@@ -14,7 +14,7 @@ Shared GitHub Actions workflows and the release flow of the 1inch contract repos
 |---|---|---|
 | `hardhat-ci.yml` | `ci.yml` in a Hardhat repository | `yarn test`, plus `yarn typecheck`, `yarn snapshot:check`, `yarn lint` and `yarn coverage` where enabled, with Hardhat's build cache |
 | `foundry-ci.yml` | `ci.yml` in a Foundry repository | The same jobs, with Foundry installed and its build output cached |
-| `tag.yml` | `tag.yml` | Tags the `package.json` version on the head of `release/X.Y.Z`, run by hand |
+| `tag.yml` | `tag.yml` | Tags the `package.json` version, `X.Y.Z` or a release candidate `X.Y.Z-rc.N`, on the head of `release/X.Y.Z`, run by hand |
 | `release.yml` | `release.yml` | Creates the GitHub Release for the tag of the `package.json` version |
 | `publish.yml` | `publish.yml` | Publishes the package to npm with trusted publishing |
 
@@ -127,11 +127,11 @@ The job runs on the caller's triggers, concurrency and read-only permissions, an
 
 ## Releases
 
-Every repository follows [RELEASE_FLOW.md](RELEASE_FLOW.md) and has the tag, the GitHub Release and the publish workflows. A release branch takes its release's fixes through pull requests until the tag, so `CI` runs on pull requests into it and on pushes to it, as the caller above sets up.
+Every repository follows [RELEASE_FLOW.md](RELEASE_FLOW.md) and has the tag, the GitHub Release and the publish workflows. A release branch takes its release's changes through pull requests until the release tag, so `CI` runs on pull requests into it and on pushes to it, as the caller above sets up.
 
 ### Tag
 
-`.github/workflows/tag.yml`, run by hand from `release/X.Y.Z` once the release is ready. It takes the version from `package.json` on that branch, tags the branch's head with it, and refuses to run from any branch other than `release/<that version>`:
+`.github/workflows/tag.yml`, run by hand from `release/X.Y.Z` once the release, or one of its release candidates, is ready. It takes the version from `package.json` on that branch, `X.Y.Z` or `X.Y.Z-rc.N`, tags the branch's head with it, and refuses any other version and any branch other than `release/X.Y.Z`, so every release candidate of `X.Y.Z` is tagged on the release's own branch:
 
 ```yaml
 name: TAG
@@ -213,10 +213,13 @@ jobs:
 | `tag-prefix` | string | `v` | Text in front of the package.json version in the tag: `v` for `v1.2.3`, empty for `1.2.3` |
 | `dry-run` | boolean | `false` | Build and validate the package, then run `npm publish --dry-run` |
 | `pack-only` | boolean | `false` | Run only the build job: check the tag, pack the package and upload it as the `npm-package` artifact, without publishing it. For the first version of a package that is not on npm yet |
+| `move-next` | boolean | `false` | After a release `X.Y.Z`, move the `next` dist-tag from a release candidate `X.Y.Z-rc.N` to the release. Needs **Allow npm dist-tag** on the package's trusted publisher |
 
-The workflow runs only from the tag made of `tag-prefix` (`v` by default) and the `package.json` version. The tag commit must belong to `release/<version>` and have a successful `CI` run from `push` or `workflow_dispatch`. Packages go to npm only, not to GitHub Packages.
+The workflow runs only from the tag made of `tag-prefix` (`v` by default) and the `package.json` version. The tag commit must belong to `release/X.Y.Z`, the release branch of its version `X.Y.Z` or `X.Y.Z-rc.N`, and have a successful `CI` run from `push` or `workflow_dispatch`. Packages go to npm only, not to GitHub Packages.
 
-A pre-release goes to the `next` dist-tag, and every other version becomes `latest`.
+A pre-release, such as a release candidate, goes to the `next` dist-tag and leaves `latest` on the last release; every other version becomes `latest`.
+
+Publishing a release leaves `next` where it was, so after `X.Y.Z` it still points at the last `X.Y.Z-rc.N`, older than `latest`. With `move-next`, the npm job then moves `next` to the release if `next` is on one of its release candidates, and leaves any other `next` alone. Moving a dist-tag with trusted publishing needs npm 11.21.0 or 12.2.0, and the npm job installs nothing, so it uses the npm of the latest Node 26. With an older npm the job ends with a warning, and if npm refuses the move, with an error; both give a package admin the command: `npm dist-tag add <package>@X.Y.Z next`. Running the job again would not help, because the release is already published.
 
 The job runs in the calling repository's `npm` environment. Create it in the repository settings before the first run, because GitHub creates an unprotected environment on first use:
 
@@ -228,7 +231,7 @@ Package installation and packing run in a separate build job with read-only repo
 npm publishing uses [trusted publishing](https://docs.npmjs.com/trusted-publishers/), so no npm token is stored anywhere. Before the first run, a package admin adds a trusted publisher in the package settings on npmjs.com:
 
 - organization `1inch` and the repository's name;
-- workflow filename `publish.yml`, with `npm publish` allowed;
+- workflow filename `publish.yml`, with `npm publish` allowed, and **Allow npm dist-tag** if the caller sets `move-next`;
 - environment `npm`.
 
 Once a publish from CI has passed, the package admin sets **Publishing access** in the package settings to "Require two-factor authentication and disallow tokens". Trusted publishing keeps working, and no npm token can publish the package any more.
@@ -241,9 +244,9 @@ npm adds a trusted publisher only to a package that already exists, so a new pac
 
 1. Run `TAG`, then `CREATE_RELEASE`, as for any release. A scoped package needs `"publishConfig": { "access": "public" }` in `package.json`.
 2. Run `PUBLISH` from the tag with `pack-only` checked. The build job runs the same checks as for any publish, packs the package and uploads it as the `npm-package` artifact. The npm job does not run, so the run never enters the `npm` environment.
-3. A package admin checks the run and downloads its package with `scripts/verify-publish-run.sh 1inch/<repository> <run-id> <tag>`. Through the GitHub API the script checks that the run was started by `workflow_dispatch` on the tag's commit, ran `.github/workflows/publish.yml` and succeeded, and that it called the shared publish workflow at the release that `publish.yml` names at that commit, pinned to that release's commit. Only then does it download `npm-package` and print the package's SHA-256 and npm integrity.
-4. The admin publishes the file with `npm publish <file>.tgz`, answering the 2FA prompt. `npm view <package>@<version> dist.integrity` then prints the integrity the script printed.
+3. A package admin checks the run and downloads its package with `scripts/verify-publish-run.sh 1inch/<repository> <run-id> <tag>`. Through the GitHub API the script checks that the run was started by `workflow_dispatch` on the tag's commit, ran `.github/workflows/publish.yml` and succeeded, and that it called the shared publish workflow at the release that `publish.yml` names at that commit, pinned to that release's commit. Only then does it download `npm-package` and print the package's SHA-256, its npm integrity and the command that publishes it.
+4. The admin publishes the file with that command, answering the 2FA prompt: `npm publish <file>.tgz`, plus `--tag next` for a pre-release, which npm refuses to publish without a dist-tag. `npm view <package>@<version> dist.integrity` then prints the integrity the script printed.
 
-The run summary alone proves nothing: without the `npm` environment a run can start from any ref, and a rewritten caller can upload any tarball with a matching summary. The script anchors to the tag instead. A run that succeeded on the tag's commit through the pinned shared workflow has passed the shared build job's checks, so that commit is on `release/<version>` and passed CI.
+The run summary alone proves nothing: without the `npm` environment a run can start from any ref, and a rewritten caller can upload any tarball with a matching summary. The script anchors to the tag instead. A run that succeeded on the tag's commit through the pinned shared workflow has passed the shared build job's checks, so that commit is on the release branch of its version and passed CI.
 
 The first version carries no provenance, because npm attaches provenance only to a publish from CI. A trusted publisher that has not published within two days expires, so the package admin adds it right before the next release, which publishes from CI. Trusted publishers created since 2026-09-03 allow only `npm stage publish` unless `npm publish` is also selected, and this workflow runs `npm publish`.

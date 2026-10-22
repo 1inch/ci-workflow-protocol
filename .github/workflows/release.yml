@@ -32,7 +32,7 @@ jobs:
           version=$(jq -r .version package.json)
           tag="${TAG_PREFIX}${version}"
           if [ "$GITHUB_REF" != "refs/tags/${tag}" ]; then
-            echo "::error::Run CREATE_RELEASE from the tag ${tag}, not from ${GITHUB_REF_NAME}. TAG creates the tag from release/${version}"
+            echo "::error::Run CREATE_RELEASE from the tag ${tag}, not from ${GITHUB_REF_NAME}. TAG creates the tag from release/${version%-rc.*}"
             exit 1
           fi
           echo "VERSION=${version}" >> "$GITHUB_ENV"

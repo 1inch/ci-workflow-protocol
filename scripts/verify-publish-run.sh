@@ -58,9 +58,14 @@ entries=$(find "$dir" -mindepth 1 -maxdepth 1)
 [[ "$(printf '%s\n' "$entries" | grep -c .)" -eq 1 && -f "$entries" && "$entries" == *.tgz ]] ||
   fail "the npm-package artifact of run $run_id should hold one tarball, it holds: ${entries:-nothing}"
 package=$entries
+version=$(tar -xOf "$package" package/package.json | jq -r .version)
+publish="npm publish $package"
+if [[ "$version" == *-* ]]; then
+  publish+=" --tag next"
+fi
 
 echo "Run $run_id built $tag ($tag_sha) with $uses ($release_sha)."
 echo "Package: $package"
 echo "SHA-256: $(openssl dgst -sha256 "$package" | awk '{print $NF}')"
 echo "npm integrity: sha512-$(openssl dgst -sha512 -binary "$package" | openssl base64 -A)"
-echo "Publish it with: npm publish $package"
+echo "Publish it with: $publish"

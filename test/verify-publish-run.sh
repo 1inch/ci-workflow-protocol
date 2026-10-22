@@ -8,7 +8,13 @@ script=$root/scripts/verify-publish-run.sh
 sim=$(mktemp -d)
 trap 'rm -rf "$sim"' EXIT
 mkdir -p "$sim/bin" "$sim/tmp" "$sim/package"
-printf '{"name":"@1inch/aqua","version":"1.0.1"}\n' > "$sim/package/package.json"
+
+# package_version <version>: the version of the package and its tag, v<version>, in the next runs.
+package_version() {
+  version=$1
+  printf '{"name":"@1inch/aqua","version":"%s"}\n' "$version" > "$sim/package/package.json"
+}
+package_version 1.0.1
 
 tag_sha=1111111111111111111111111111111111111111
 release_sha=2222222222222222222222222222222222222222
@@ -21,7 +27,7 @@ if [ "$1 $2" = "run download" ]; then
     [ "$1" = --dir ] && dir=$2
     shift
   done
-  tar -czf "$dir/1inch-aqua-1.0.1.tgz" -C "$SIM" package
+  tar -czf "$dir/1inch-aqua-$SIM_VERSION.tgz" -C "$SIM" package
   if [ "$SIM_EXTRA_MEMBER" = 1 ]; then
     echo stray > "$dir/stray.txt"
   fi
@@ -33,7 +39,7 @@ while [ "$1" = -H ]; do
   shift 2
 done
 case "$1" in
-  repos/1inch/aqua/git/ref/tags/v1.0.1) printf '{"object":{"type":"commit","sha":"%s"}}\n' "$SIM_TAG_SHA" ;;
+  "repos/1inch/aqua/git/ref/tags/v$SIM_VERSION") printf '{"object":{"type":"commit","sha":"%s"}}\n' "$SIM_TAG_SHA" ;;
   repos/1inch/ci-workflow-protocol/git/ref/tags/v2.2.0) echo '{"object":{"type":"tag","sha":"3333333333333333333333333333333333333333"}}' ;;
   repos/1inch/ci-workflow-protocol/git/tags/3333333333333333333333333333333333333333) printf '{"object":{"type":"commit","sha":"%s"}}\n' "$SIM_RELEASE_SHA" ;;
   "repos/1inch/aqua/contents/.github/workflows/publish.yml?ref=$SIM_TAG_SHA") cat "$SIM/caller.yml" ;;
@@ -67,7 +73,7 @@ run() {
 check() {
   local title=$1 expected=$2 status=0
   last_out=$(PATH="$sim/bin:$PATH" TMPDIR="$sim/tmp" SIM="$sim" SIM_TAG_SHA=$tag_sha SIM_RELEASE_SHA=$release_sha SIM_EXTRA_MEMBER=$extra_member \
-    bash "$script" 1inch/aqua 123 v1.0.1 2>&1) || status=$?
+    SIM_VERSION=$version bash "$script" 1inch/aqua 123 "v$version" 2>&1) || status=$?
   if [[ ( "$expected" == ok && "$status" -eq 0 ) || ( "$expected" != ok && "$status" -ne 0 && "$last_out" == *"$expected"* ) ]]; then
     echo "ok   $title"
   else
@@ -88,6 +94,23 @@ else
   echo "FAIL the printed integrity is the downloaded package's: $last_out"
   failures=$((failures + 1))
 fi
+if [[ -n "$package" && "$last_out" == *"Publish it with: npm publish $package" ]]; then
+  echo "ok   the printed command publishes a release under latest"
+else
+  echo "FAIL the printed command publishes a release under latest: $last_out"
+  failures=$((failures + 1))
+fi
+
+package_version 1.0.2-rc.1
+check "a pack-only run on a release candidate tag" ok
+package=$(sed -n 's/^Package: //p' <<<"$last_out")
+if [[ -n "$package" && "$last_out" == *"Publish it with: npm publish $package --tag next" ]]; then
+  echo "ok   the printed command publishes a release candidate under next"
+else
+  echo "FAIL the printed command publishes a release candidate under next: $last_out"
+  failures=$((failures + 1))
+fi
+package_version 1.0.1
 
 extra_member=1
 check "an artifact with a second file" "should hold one tarball"
