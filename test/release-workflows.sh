@@ -45,6 +45,16 @@ EOF
 cat > "$sim/bin/npm" <<'EOF'
 #!/usr/bin/env bash
 echo "npm $*" >> "$SIM_LOG"
+if [ "$1" = --version ]; then
+  echo "$SIM_NPM_VERSION"
+fi
+if [ "$1 $2" = "dist-tag ls" ]; then
+  echo "latest: 7.0.1"
+  [ -z "$SIM_NEXT" ] || echo "next: $SIM_NEXT"
+fi
+if [ "$1 $2" = "dist-tag add" ] && [ "$SIM_DIST_TAG_DENIED" = 1 ]; then
+  exit 1
+fi
 if [ "$1" = pack ]; then
   destination=.
   if [ "${2:-}" = --pack-destination ]; then
@@ -63,7 +73,7 @@ EOF
 cat > "$sim/bin/git" <<'EOF'
 #!/usr/bin/env bash
 echo "git $*" >> "$SIM_LOG"
-if [ "$1" = merge-base ] && [ "$SIM_ON_BRANCH" != 1 ]; then
+if [ "$1" = merge-base ] && [[ " $SIM_BRANCHES " != *" ${4:-} "* ]]; then
   exit 1
 fi
 EOF
@@ -75,8 +85,12 @@ chmod +x "$sim/bin/gh" "$sim/bin/npm" "$sim/bin/git" "$sim/bin/yarn"
 
 failures=0
 tag_exists=0
-on_branch=1
+# The branches that hold the commit under test, for `git merge-base --is-ancestor`.
+branches=origin/release/7.0.1
 dry_run=false
+npm_version=11.21.1
+next_tag=
+dist_tag_denied=0
 extra_package=0
 root_symlink=0
 extra_artifact=0
@@ -120,8 +134,9 @@ run_steps() {
   : > "$sim/calls"
   echo "$wd" > "$sim/last_wd"
   (
-    export PATH="$sim/bin:$PATH" SIM_LOG="$sim/calls" SIM_RUNS="$sim/runs.json" SIM_TAG_EXISTS=$tag_exists SIM_ON_BRANCH=$on_branch DRY_RUN=$dry_run
-    export SIM_VERSION=$version SIM_EXTRA_PACKAGE=$extra_package
+    export PATH="$sim/bin:$PATH" SIM_LOG="$sim/calls" SIM_RUNS="$sim/runs.json" SIM_TAG_EXISTS=$tag_exists SIM_BRANCHES=$branches DRY_RUN=$dry_run
+    export SIM_VERSION=$version SIM_EXTRA_PACKAGE=$extra_package SIM_NPM_VERSION=$npm_version SIM_NEXT=$next_tag
+    export SIM_DIST_TAG_DENIED=$dist_tag_denied
     export GITHUB_REPOSITORY=1inch/solidity-utils GITHUB_SHA=abc1234 GH_TOKEN=stub TAG_PREFIX=v
     export GITHUB_REF=$ref GITHUB_REF_NAME=${ref#refs/*/} GITHUB_ENV="$wd/env" GITHUB_OUTPUT="$wd/output" GITHUB_STEP_SUMMARY="$wd/summary" RUNNER_TEMP="$wd/runner-temp"
     for step in "$@"; do
@@ -160,9 +175,9 @@ check() {
 
 # run_workflow <workflow> <version> <ref> <inputs as JSON>
 # Runs the workflow's jobs in order, as GitHub would for these inputs: a job runs when the jobs it needs succeeded and
-# its `if` holds, `run` steps execute in the working directory, upload and download steps copy files through
-# $wd/artifacts, and other `uses` steps are skipped. An `if` or `env` expression other than `inputs.<name>`,
-# `!inputs.<name>`, `github.token` or `steps.<id>.outputs.<name>` stops the run with an error.
+# its `if` holds, and a step when its own `if` holds. `run` steps execute in the working directory, upload and download
+# steps copy files through $wd/artifacts, and other `uses` steps are skipped. An `if` or `env` expression other than
+# `inputs.<name>`, `!inputs.<name>`, `github.token` or `steps.<id>.outputs.<name>` stops the run with an error.
 # Prints "ok", or the name of the first step that fails, and writes the jobs that ran to $sim/jobs.
 run_workflow() {
   local wd
@@ -172,8 +187,9 @@ run_workflow() {
   : > "$sim/calls"
   : > "$sim/jobs"
   echo "$wd" > "$sim/last_wd"
-  PATH="$sim/bin:$PATH" SIM_LOG="$sim/calls" SIM_RUNS="$sim/runs.json" SIM_TAG_EXISTS=$tag_exists SIM_ON_BRANCH=$on_branch \
-    SIM_VERSION=$2 SIM_EXTRA_PACKAGE=$extra_package GITHUB_REPOSITORY=1inch/solidity-utils GITHUB_SHA=abc1234 \
+  PATH="$sim/bin:$PATH" SIM_LOG="$sim/calls" SIM_RUNS="$sim/runs.json" SIM_TAG_EXISTS=$tag_exists SIM_BRANCHES=$branches \
+    SIM_VERSION=$2 SIM_EXTRA_PACKAGE=$extra_package SIM_NPM_VERSION=$npm_version SIM_NEXT=$next_tag \
+    SIM_DIST_TAG_DENIED=$dist_tag_denied GITHUB_REPOSITORY=1inch/solidity-utils GITHUB_SHA=abc1234 \
     GITHUB_REF=$3 GITHUB_REF_NAME=${3#refs/*/} GITHUB_STEP_SUMMARY="$wd/summary" RUNNER_TEMP="$wd/runner-temp" \
     ruby - "$workflows/$1" "$wd" "$4" "$sim/jobs" <<'RUBY'
 require "yaml"
@@ -218,6 +234,7 @@ workflow["jobs"].each do |job_name, job|
   job_env = {}
   outputs = {}
   job["steps"].each_with_index do |step, index|
+    next if step.key?("if") && evaluate(step["if"], inputs, outputs) != true
     with = step["with"] || {}
     ok =
       if step["run"]
@@ -342,18 +359,27 @@ ci_run success
 tag_exists=1
 check "TAG when v7.0.1 already exists" "Tag the version in package.json" "$tagged" tag.yml 7.0.1 refs/heads/release/7.0.1 "${tag_steps[@]}"
 tag_exists=0
+check "TAG a release candidate from release/7.1.0" ok 'git/refs -f ref=refs/tags/v7\.1\.0-rc\.1 ' tag.yml 7.1.0-rc.1 refs/heads/release/7.1.0 "${tag_steps[@]}"
+check "TAG a release candidate from release/7.1.0-rc.1" "Check the release branch" - tag.yml 7.1.0-rc.1 refs/heads/release/7.1.0-rc.1 "${tag_steps[@]}"
+check "TAG a release candidate from main" "Check the release branch" - tag.yml 7.1.0-rc.1 refs/heads/main "${tag_steps[@]}"
+check "TAG a pre-release other than a release candidate" "Check the release branch" - tag.yml 7.1.0-beta.1 refs/heads/release/7.1.0-beta.1 "${tag_steps[@]}"
+check "TAG a release candidate without its number" "Check the release branch" - tag.yml 7.1.0-rc refs/heads/release/7.1.0-rc "${tag_steps[@]}"
 
 check "CREATE_RELEASE from v7.0.1" ok - release.yml 7.0.1 refs/tags/v7.0.1 "Find the release tag"
+check "CREATE_RELEASE from v7.1.0-rc.1" ok - release.yml 7.1.0-rc.1 refs/tags/v7.1.0-rc.1 "Find the release tag"
 check "CREATE_RELEASE from release/7.0.1" "Find the release tag" - release.yml 7.0.1 refs/heads/release/7.0.1 "Find the release tag"
 check "CREATE_RELEASE from v7.0.0 while package.json says 7.0.1" "Find the release tag" - release.yml 7.0.1 refs/tags/v7.0.0 "Find the release tag"
 
 publish_build_steps=("Check the release tag" "Check the release branch" "Check CI on the tag commit")
 ci_run success
-on_branch=1
 check "PUBLISH build from tested release tag" ok - publish.yml 7.0.1 refs/tags/v7.0.1 "${publish_build_steps[@]}"
-on_branch=0
+branches=origin/main
 check "PUBLISH rejects tag off release branch" "Check the release branch" - publish.yml 7.0.1 refs/tags/v7.0.1 "${publish_build_steps[@]}"
-on_branch=1
+branches=origin/release/7.1.0
+check "PUBLISH build from a release candidate tag on release/7.1.0" ok - publish.yml 7.1.0-rc.1 refs/tags/v7.1.0-rc.1 "${publish_build_steps[@]}"
+branches=origin/release/7.1.0-rc.1
+check "PUBLISH rejects a release candidate tag that only release/7.1.0-rc.1 holds" "Check the release branch" - publish.yml 7.1.0-rc.1 refs/tags/v7.1.0-rc.1 "${publish_build_steps[@]}"
+branches=origin/release/7.0.1
 ci_run failure
 check "PUBLISH rejects tag without passed CI" "Check CI on the tag commit" - publish.yml 7.0.1 refs/tags/v7.0.1 "${publish_build_steps[@]}"
 ci_run success workflow_dispatch
@@ -392,6 +418,31 @@ extra_artifact=1
 check "PUBLISH refuses an artifact with a second file" "Publish" - publish.yml 7.0.1 refs/tags/v7.0.1 "Publish"
 extra_artifact=0
 
+listed='^npm --version npm dist-tag ls @1inch/solidity-utils $'
+moved='npm dist-tag ls @1inch/solidity-utils npm dist-tag add @1inch/solidity-utils@7\.1\.0 next $'
+next_tag=7.1.0-rc.2
+check "PUBLISH moves next from 7.1.0-rc.2 to the release 7.1.0" ok "^npm --version $moved" publish.yml 7.1.0 refs/tags/v7.1.0 "Move next to the release"
+check "PUBLISH moves no tag for a release candidate" ok - publish.yml 7.1.0-rc.3 refs/tags/v7.1.0-rc.3 "Move next to the release"
+dry_run=true
+check "PUBLISH dry-run leaves next on 7.1.0-rc.2" ok "$listed" publish.yml 7.1.0 refs/tags/v7.1.0 "Move next to the release"
+dry_run=false
+next_tag=7.2.0-rc.1
+check "PUBLISH leaves next on a release candidate of a later version" ok "$listed" publish.yml 7.1.0 refs/tags/v7.1.0 "Move next to the release"
+next_tag=
+check "PUBLISH leaves next unset" ok "$listed" publish.yml 7.1.0 refs/tags/v7.1.0 "Move next to the release"
+next_tag=7.1.0-rc.2
+npm_version=11.20.0
+check "PUBLISH leaves next to a package admin on npm 11.20.0" ok '^npm --version $' publish.yml 7.1.0 refs/tags/v7.1.0 "Move next to the release"
+npm_version=12.1.0
+check "PUBLISH leaves next to a package admin on npm 12.1.0" ok '^npm --version $' publish.yml 7.1.0 refs/tags/v7.1.0 "Move next to the release"
+npm_version=12.2.0
+check "PUBLISH moves next on npm 12.2.0" ok "^npm --version $moved" publish.yml 7.1.0 refs/tags/v7.1.0 "Move next to the release"
+npm_version=11.21.1
+dist_tag_denied=1
+check "PUBLISH fails when npm refuses to move next" "Move next to the release" "^npm --version $moved" publish.yml 7.1.0 refs/tags/v7.1.0 "Move next to the release"
+dist_tag_denied=0
+next_tag=
+
 published='npm publish \./package/1inch-solidity-utils-7\.0\.1\.tgz $'
 check_workflow "PUBLISH pack-only runs the build job and publishes nothing" ok "$packed" build publish.yml 7.0.1 refs/tags/v7.0.1 '{"pack-only": true}'
 artifact=$(ls "$(cat "$sim/last_wd")/artifacts/npm-package" 2>/dev/null | tr '\n' ' ')
@@ -402,6 +453,14 @@ else
   failures=$((failures + 1))
 fi
 check_workflow "PUBLISH publishes the package the build job packed" ok "${packed%\$}$published" "build npm" publish.yml 7.0.1 refs/tags/v7.0.1 '{}'
+rc_published='npm publish \./package/1inch-solidity-utils-7\.1\.0-rc\.1\.tgz --tag next $'
+branches=origin/release/7.1.0
+check_workflow "PUBLISH publishes a release candidate from release/7.1.0 under next" ok "${packed%\$}$rc_published" "build npm" publish.yml 7.1.0-rc.1 refs/tags/v7.1.0-rc.1 '{}'
+next_tag=7.1.0-rc.2
+check_workflow "PUBLISH with move-next publishes 7.1.0 and moves next to it" ok "${packed%\$}npm publish \./package/1inch-solidity-utils-7\.1\.0\.tgz npm --version $moved" "build npm" publish.yml 7.1.0 refs/tags/v7.1.0 '{"move-next": true}'
+check_workflow "PUBLISH without move-next leaves next on 7.1.0-rc.2" ok "${packed%\$}npm publish \./package/1inch-solidity-utils-7\.1\.0\.tgz \$" "build npm" publish.yml 7.1.0 refs/tags/v7.1.0 '{}'
+next_tag=
+branches=origin/release/7.0.1
 check_workflow "PUBLISH pack-only from main stops before packing" "Check the release tag" - build publish.yml 7.0.1 refs/heads/main '{"pack-only": true}'
 check "PUBLISH from main" "Check the release tag" - publish.yml 7.0.1 refs/heads/main "Check the release tag" "Publish"
 
